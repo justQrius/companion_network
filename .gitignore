@@ -54,10 +54,15 @@ coverage.xml
 .pytest_cache/
 
 # Agent and Tool Configurations
-.agent/
-.bmad/
 .claude/
 .cursor/
-.gemini/
 context/
+.agent
+.bmad
+.gemini
+docs
+
+tests
+# Environment Variables (CRITICAL - DO NOT COMMIT SECRETS)
+.env
 
