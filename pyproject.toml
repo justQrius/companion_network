@@ -1,0 +1,11 @@
+[project]
+name = "companion-network"
+version = "0.1.0"
+description = "AI Companion Network with Google ADK and MCP"
+requires-python = ">=3.10"
+dependencies = [
+    "google-adk>=1.19.0",
+    "mcp[cli]>=1.22.0",
+    "gradio",
+    "python-dotenv",
+]
