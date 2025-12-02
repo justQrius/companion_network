@@ -1,0 +1,407 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Companion Network - User Flow Prototype</title>
+    <style>
+        :root {
+            --bg-color: #ffffff;
+            --text-color: #111827;
+            --border-color: #e5e7eb;
+            --primary: #10b981;
+            /* Emerald Green */
+            --secondary: #3b82f6;
+            --user-bubble: #f3f4f6;
+            --agent-bubble: #ffffff;
+        }
+
+        body {
+            font-family: 'Inter', system-ui, -apple-system, sans-serif;
+            background-color: #f9fafb;
+            color: var(--text-color);
+            margin: 0;
+            padding: 0;
+            height: 100vh;
+            display: flex;
+            flex-direction: column;
+        }
+
+        /* Controls */
+        .controls {
+            background: white;
+            padding: 1rem 2rem;
+            border-bottom: 1px solid var(--border-color);
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            box-shadow: 0 1px 2px rgba(0, 0, 0, 0.05);
+            z-index: 10;
+        }
+
+        .step-indicator {
+            font-weight: 600;
+            color: #374151;
+        }
+
+        .btn {
+            background: var(--primary);
+            color: white;
+            border: none;
+            padding: 0.5rem 1rem;
+            border-radius: 0.375rem;
+            cursor: pointer;
+            font-weight: 500;
+        }
+
+        .btn:disabled {
+            background: #d1d5db;
+            cursor: not-allowed;
+        }
+
+        /* Main Layout - Balanced Split */
+        .main-container {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            overflow: hidden;
+            max-width: 1400px;
+            margin: 0 auto;
+            width: 100%;
+            background: white;
+            box-shadow: 0 0 20px rgba(0, 0, 0, 0.05);
+        }
+
+        .split-view {
+            flex: 1;
+            display: flex;
+            overflow: hidden;
+        }
+
+        .pane {
+            flex: 1;
+            display: flex;
+            flex-direction: column;
+            border-right: 1px solid var(--border-color);
+            position: relative;
+        }
+
+        .pane:last-child {
+            border-right: none;
+        }
+
+        .pane-header {
+            padding: 1rem;
+            border-bottom: 1px solid var(--border-color);
+            font-weight: 600;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+        }
+
+        .avatar {
+            width: 2rem;
+            height: 2rem;
+            border-radius: 50%;
+            background: #e5e7eb;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            font-size: 1rem;
+        }
+
+        .chat-area {
+            flex: 1;
+            padding: 1.5rem;
+            overflow-y: auto;
+            display: flex;
+            flex-direction: column;
+            gap: 1rem;
+        }
+
+        .message {
+            max-width: 80%;
+            padding: 0.75rem 1rem;
+            border-radius: 1rem;
+            font-size: 0.9375rem;
+            line-height: 1.5;
+            opacity: 0;
+            transform: translateY(10px);
+            animation: fadeIn 0.3s forwards;
+        }
+
+        @keyframes fadeIn {
+            to {
+                opacity: 1;
+                transform: translateY(0);
+            }
+        }
+
+        .message.user {
+            align-self: flex-end;
+            background: var(--user-bubble);
+            border-bottom-right-radius: 0.25rem;
+        }
+
+        .message.agent {
+            align-self: flex-start;
+            background: var(--agent-bubble);
+            border: 1px solid var(--border-color);
+            border-bottom-left-radius: 0.25rem;
+        }
+
+        .input-area {
+            padding: 1rem;
+            border-top: 1px solid var(--border-color);
+        }
+
+        .input-box {
+            width: 100%;
+            padding: 0.75rem;
+            border: 1px solid var(--border-color);
+            border-radius: 0.5rem;
+            background: #f9fafb;
+            font-family: inherit;
+        }
+
+        /* Network Log - Expandable */
+        .network-log-container {
+            border-top: 1px solid var(--border-color);
+            background: #111827;
+            color: #10b981;
+            transition: height 0.3s ease;
+            height: 40px;
+            /* Collapsed state */
+            display: flex;
+            flex-direction: column;
+        }
+
+        .network-log-container.expanded {
+            height: 200px;
+        }
+
+        .log-header {
+            padding: 0.5rem 1rem;
+            background: #1f2937;
+            cursor: pointer;
+            display: flex;
+            justify-content: space-between;
+            align-items: center;
+            font-size: 0.8rem;
+            color: #9ca3af;
+            user-select: none;
+        }
+
+        .log-header:hover {
+            color: white;
+        }
+
+        .log-content {
+            flex: 1;
+            padding: 1rem;
+            font-family: 'Menlo', 'Monaco', monospace;
+            font-size: 0.85rem;
+            overflow-y: auto;
+            opacity: 0.8;
+        }
+
+        .log-entry {
+            margin-bottom: 0.5rem;
+            opacity: 0;
+            animation: fadeIn 0.1s forwards;
+        }
+
+        .log-timestamp {
+            color: #6b7280;
+            margin-right: 0.5rem;
+        }
+
+        .log-arrow {
+            color: #6ee7b7;
+            font-weight: bold;
+        }
+    </style>
+</head>
+
+<body>
+
+    <div class="controls">
+        <div class="step-indicator">Step <span id="step-num">0</span>: <span id="step-desc">Start</span></div>
+        <button id="next-btn" class="btn" onclick="nextStep()">Start Demo</button>
+    </div>
+
+    <div class="main-container">
+        <div class="split-view">
+            <!-- Alice's Pane -->
+            <div class="pane">
+                <div class="pane-header">
+                    <div class="avatar">👩</div>
+                    Alice's Companion
+                </div>
+                <div class="chat-area" id="alice-chat">
+                    <!-- Messages go here -->
+                </div>
+                <div class="input-area">
+                    <input class="input-box" placeholder="Message Alice's Companion..." disabled>
+                </div>
+            </div>
+
+            <!-- Bob's Pane -->
+            <div class="pane">
+                <div class="pane-header">
+                    <div class="avatar">👨</div>
+                    Bob's Companion
+                </div>
+                <div class="chat-area" id="bob-chat">
+                    <!-- Messages go here -->
+                </div>
+                <div class="input-area">
+                    <input class="input-box" placeholder="Message Bob's Companion..." disabled>
+                </div>
+            </div>
+        </div>
+
+        <!-- Expandable Network Log -->
+        <div class="network-log-container" id="log-container">
+            <div class="log-header" onclick="toggleLog()">
+                <span>NETWORK ACTIVITY MONITOR</span>
+                <span id="log-toggle-icon">▲ Expand</span>
+            </div>
+            <div class="log-content" id="log-content">
+                <!-- Logs go here -->
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let currentStep = 0;
+        const steps = [
+            {
+                desc: "User Request",
+                action: () => {
+                    addMessage('alice', 'user', 'Plan dinner with Bob this weekend.');
+                }
+            },
+            {
+                desc: "Agent Acknowledgment",
+                action: () => {
+                    addMessage('alice', 'agent', 'Sure. I\'ll coordinate with Bob\'s agent to find a time.');
+                    expandLog(); // Auto-expand for demo effect
+                }
+            },
+            {
+                desc: "Network Negotiation (Handshake)",
+                action: () => {
+                    addLog('Alice->Bob', 'initiate_protocol(intent="schedule_event")');
+                    setTimeout(() => addLog('Bob->Alice', 'ack(status="ready")'), 500);
+                    addMessage('bob', 'agent', 'Incoming request from Alice\'s agent: "Schedule Event"');
+                }
+            },
+            {
+                desc: "Network Negotiation (Availability)",
+                action: () => {
+                    addLog('Alice->Bob', 'query_availability(window="weekend", duration="2h")');
+                    setTimeout(() => addLog('Bob->Alice', 'return_slots(["Sat 19:00", "Sun 18:00"])'), 800);
+                }
+            },
+            {
+                desc: "Proposal",
+                action: () => {
+                    addLog('Alice->Bob', 'propose_slot("Sat 19:00")');
+                    addMessage('alice', 'agent', 'Bob is free Saturday at 7pm. Shall I book it?');
+                }
+            },
+            {
+                desc: "User Approval",
+                action: () => {
+                    addMessage('alice', 'user', 'Yes, that works.');
+                }
+            },
+            {
+                desc: "Finalization",
+                action: () => {
+                    addLog('Alice->Bob', 'confirm_booking("Sat 19:00")');
+                    addMessage('alice', 'agent', 'Done! Dinner is scheduled for Saturday at 7pm.');
+                    addMessage('bob', 'agent', 'Dinner with Alice confirmed for Saturday at 7pm.');
+                }
+            }
+        ];
+
+        function nextStep() {
+            if (currentStep < steps.length) {
+                const step = steps[currentStep];
+                document.getElementById('step-num').innerText = currentStep + 1;
+                document.getElementById('step-desc').innerText = step.desc;
+                step.action();
+                currentStep++;
+
+                if (currentStep === steps.length) {
+                    document.getElementById('next-btn').innerText = "Reset Demo";
+                    document.getElementById('next-btn').onclick = resetDemo;
+                } else {
+                    document.getElementById('next-btn').innerText = "Next Step";
+                }
+            }
+        }
+
+        function resetDemo() {
+            currentStep = 0;
+            document.getElementById('alice-chat').innerHTML = '';
+            document.getElementById('bob-chat').innerHTML = '';
+            document.getElementById('log-content').innerHTML = '';
+            document.getElementById('step-num').innerText = '0';
+            document.getElementById('step-desc').innerText = 'Start';
+            document.getElementById('next-btn').innerText = "Start Demo";
+            document.getElementById('next-btn').onclick = nextStep;
+            collapseLog();
+        }
+
+        function addMessage(pane, role, text) {
+            const container = document.getElementById(pane + '-chat');
+            const div = document.createElement('div');
+            div.className = `message ${role}`;
+            div.innerText = text;
+            container.appendChild(div);
+            container.scrollTop = container.scrollHeight;
+        }
+
+        function addLog(actors, action) {
+            const container = document.getElementById('log-content');
+            const div = document.createElement('div');
+            div.className = 'log-entry';
+            const time = new Date().toLocaleTimeString('en-US', { hour12: false, hour: "numeric", minute: "numeric", second: "numeric" });
+            div.innerHTML = `<span class="log-timestamp">[${time}]</span> <span class="log-arrow">${actors}:</span> ${action}`;
+            container.appendChild(div);
+            container.scrollTop = container.scrollHeight;
+        }
+
+        function toggleLog() {
+            const container = document.getElementById('log-container');
+            const icon = document.getElementById('log-toggle-icon');
+            if (container.classList.contains('expanded')) {
+                container.classList.remove('expanded');
+                icon.innerText = '▲ Expand';
+            } else {
+                container.classList.add('expanded');
+                icon.innerText = '▼ Collapse';
+            }
+        }
+
+        function expandLog() {
+            const container = document.getElementById('log-container');
+            if (!container.classList.contains('expanded')) {
+                toggleLog();
+            }
+        }
+
+        function collapseLog() {
+            const container = document.getElementById('log-container');
+            if (container.classList.contains('expanded')) {
+                toggleLog();
+            }
+        }
+    </script>
+</body>
+
+</html>

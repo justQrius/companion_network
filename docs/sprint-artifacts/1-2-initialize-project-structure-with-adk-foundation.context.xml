@@ -1,0 +1,132 @@
+<story-context id="1-2-initialize-project-structure-with-adk-foundation" v="1.0">
+  <metadata>
+    <epicId>1</epicId>
+    <storyId>2</storyId>
+    <title>Initialize Project Structure with ADK Foundation</title>
+    <status>drafted</status>
+    <generatedAt>2025-11-30</generatedAt>
+    <generator>BMAD Story Context Workflow</generator>
+    <sourceStoryPath>docs/sprint-artifacts/1-2-initialize-project-structure-with-adk-foundation.md</sourceStoryPath>
+  </metadata>
+
+  <story>
+    <asA>Developer</asA>
+    <iWant>to create the foundational directory structure and module organization</iWant>
+    <soThat>the codebase is organized logically, enabling modular development of Alice, Bob, and shared components.</soThat>
+    <tasks>
+- [ ] Task 1: Create Alice Companion Package (AC: 1, 2)
+  - [ ] Subtask 1.1: Create `alice_companion` directory
+  - [ ] Subtask 1.2: Create empty `alice_companion/__init__.py`
+- [ ] Task 2: Create Bob Companion Package (AC: 1, 2)
+  - [ ] Subtask 2.1: Create `bob_companion` directory
+  - [ ] Subtask 2.2: Create empty `bob_companion/__init__.py`
+- [ ] Task 3: Create Shared Package (AC: 1, 2)
+  - [ ] Subtask 3.1: Create `shared` directory
+  - [ ] Subtask 3.2: Create empty `shared/__init__.py`
+- [ ] Task 4: Create Application Entry Point (AC: 3)
+  - [ ] Subtask 4.1: Create `app.py` with a basic "Hello World" or placeholder comment
+    </tasks>
+  </story>
+
+  <acceptanceCriteria>
+1. **Directory Structure Created**: The project root contains `alice_companion/`, `bob_companion/`, and `shared/` directories.
+2. **Python Packages Initialized**: Each directory contains an `__init__.py` file to establish them as Python packages.
+3. **Entry Point Placeholder**: An `app.py` file exists in the project root to serve as the future application entry point.
+  </acceptanceCriteria>
+
+  <artifacts>
+    <docs>
+      <doc>
+        <path>docs/sprint-artifacts/tech-spec-epic-1.md</path>
+        <title>Epic Technical Specification: Foundation &amp; Project Setup</title>
+        <section>Detailed Design - Services and Modules</section>
+        <snippet>
+| Module/Directory | Responsibility |
+| :--- | :--- |
+| `alice_companion/` | Package for Alice's agent code, MCP server, and client. |
+| `bob_companion/` | Package for Bob's agent code, MCP server, and client. |
+| `shared/` | Package for shared utilities, data models, and logger. |
+| `app.py` | Entry point for the Gradio application (placeholder/setup). |
+        </snippet>
+      </doc>
+      <doc>
+        <path>docs/architecture.md</path>
+        <title>Companion Network - Architecture Document</title>
+        <section>Project Initialization</section>
+        <snippet>
+# 4. Create ADK agent structure
+adk create alice_companion
+adk create bob_companion
+mkdir shared
+        </snippet>
+      </doc>
+      <doc>
+        <path>docs/architecture.md</path>
+        <title>Companion Network - Architecture Document</title>
+        <section>Project Structure</section>
+        <snippet>
+companion_network/
+├── alice_companion/              # Alice's Companion agent
+│   ├── __init__.py              # Package marker
+├── bob_companion/                # Bob's Companion agent
+│   ├── __init__.py
+├── shared/                       # Shared utilities
+│   ├── __init__.py
+└── app.py                        # Gradio UI orchestrating both Companions
+        </snippet>
+      </doc>
+      <doc>
+        <path>docs/prd.md</path>
+        <title>companion_network - Product Requirements Document</title>
+        <section>Project Structure</section>
+        <snippet>
+companion_network/
+├── alice_companion/              # Alice's Companion agent
+├── bob_companion/                # Bob's Companion agent
+├── shared/                       # Shared utilities
+└── app.py                        # Gradio UI orchestrating both Companions
+        </snippet>
+      </doc>
+    </docs>
+    <code>
+      <!-- No existing code for this story -->
+    </code>
+    <dependencies>
+      <ecosystem name="python">
+        <package name="google-adk" version=">=1.19.0" />
+        <package name="mcp[cli]" version=">=1.22.0" />
+        <package name="gradio" version="latest" />
+        <package name="python-dotenv" version="latest" />
+      </ecosystem>
+    </dependencies>
+  </artifacts>
+
+  <constraints>
+    <constraint>
+      <source>docs/sprint-artifacts/tech-spec-epic-1.md</source>
+      <description>Module Structure: `alice_companion/`, `bob_companion/`, `shared/`, `app.py`</description>
+    </constraint>
+    <constraint>
+      <source>docs/sprint-artifacts/1-2-initialize-project-structure-with-adk-foundation.md</source>
+      <description>No external dependencies are required for this story (standard file system operations).</description>
+    </constraint>
+  </constraints>
+
+  <interfaces>
+    <!-- No interfaces defined yet -->
+  </interfaces>
+
+  <tests>
+    <standards>
+      Manual verification of file existence and structure.
+    </standards>
+    <locations>
+      Project root directory.
+    </locations>
+    <ideas>
+      <idea ac="1">Check for existence of `alice_companion`, `bob_companion`, and `shared` directories.</idea>
+      <idea ac="2">Check for existence of `__init__.py` in each directory.</idea>
+      <idea ac="3">Check for existence of `app.py` in project root.</idea>
+    </ideas>
+  </tests>
+</story-context>

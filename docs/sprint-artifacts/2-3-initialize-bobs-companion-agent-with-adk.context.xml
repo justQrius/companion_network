@@ -1,0 +1,135 @@
+<story-context id=".bmad/bmm/workflows/4-implementation/story-context/template" v="1.0">
+  <metadata>
+    <epicId>2</epicId>
+    <storyId>3</storyId>
+    <title>Initialize Bob's Companion Agent with ADK</title>
+    <status>drafted</status>
+    <generatedAt>2025-12-02</generatedAt>
+    <generator>BMAD Story Context Workflow</generator>
+    <sourceStoryPath>docs/sprint-artifacts/2-3-initialize-bobs-companion-agent-with-adk.md</sourceStoryPath>
+  </metadata>
+
+  <story>
+    <asA>As a developer</asA>
+    <iWant>I want Bob's Companion agent initialized using Google ADK</iWant>
+    <soThat>So that Bob has an intelligent agent that mirrors Alice's capabilities</soThat>
+    <tasks>
+- [ ] Task 1: Set Up ADK Agent Framework for Bob (AC: 1, 2)
+  - [ ] Subtask 1.1: Import required ADK modules (Agent, Runner, SqliteSessionService, InMemoryMemoryService)
+  - [ ] Subtask 1.2: Import model configuration (Gemini 2.5 Pro)
+  - [ ] Subtask 1.3: Use same SQLite database path as Alice (`companion_sessions.db`)
+  - [ ] Subtask 1.4: Initialize SqliteSessionService with same database path (shared SQLite file)
+  - [ ] Subtask 1.5: Initialize InMemoryMemoryService
+  - [ ] Subtask 1.6: Configure agent name: "Bob's Companion"
+  - [ ] Subtask 1.7: Configure model: `gemini-2.5-pro`
+  - [ ] Subtask 1.8: Create system instruction emphasizing coordination, privacy, natural conversation (Bob-specific)
+  - [ ] Subtask 1.9: Set session ID: "bob_session" (different from Alice's "alice_session")
+  - [ ] Subtask 1.10: Combine all components to create agent instance
+  - [ ] Subtask 1.11: Test agent instantiation (no errors)
+
+- [ ] Task 2: Verify Agent Functionality (AC: 3, 4, 5, 6, 7)
+  - [ ] Subtask 2.1: Verify agent.run() method exists and is callable
+  - [ ] Subtask 2.2: Test agent.run() with simple message ("Hello")
+  - [ ] Subtask 2.3: Verify session state is created in SQLite database with "bob_session" ID
+  - [ ] Subtask 2.4: Restart agent and verify session state persists
+  - [ ] Subtask 2.5: Verify session data is retrievable after restart
+  - [ ] Subtask 2.6: Test concurrent operation: Run both Alice and Bob agents simultaneously
+  - [ ] Subtask 2.7: Verify session isolation: Alice's session data doesn't interfere with Bob's
+  - [ ] Subtask 2.8: Verify capability parity: Bob's agent has same methods and structure as Alice's
+
+- [ ] Task 3: Create Verification Script (AC: 1, 2, 3, 4, 5, 6, 7)
+  - [ ] Subtask 3.1: Create `tests/verify_bob_agent.py` following Epic 1 verification pattern
+  - [ ] Subtask 3.2: Test agent instantiation without errors
+  - [ ] Subtask 3.3: Test agent.run() method availability
+  - [ ] Subtask 3.4: Test session persistence (create session, restart, verify data)
+  - [ ] Subtask 3.5: Test concurrent operation with Alice's agent
+  - [ ] Subtask 3.6: Test session isolation (verify separate session IDs)
+  - [ ] Subtask 3.7: Verify all configuration matches AC requirements
+  - [ ] Subtask 3.8: Run verification script before marking tasks complete
+
+- [ ] Task 4: Testing and Documentation (AC: 1, 2, 3, 4, 5, 6, 7)
+  - [ ] Subtask 4.1: Create basic test file `tests/test_bob_agent.py` (if tests directory exists)
+  - [ ] Subtask 4.2: Test agent initialization with all required components
+  - [ ] Subtask 4.3: Test agent.run() with sample messages
+  - [ ] Subtask 4.4: Test session persistence across restarts
+  - [ ] Subtask 4.5: Test concurrent operation with Alice's agent
+  - [ ] Subtask 4.6: Test session isolation between Alice and Bob
+  - [ ] Subtask 4.7: Add docstrings to agent.py explaining configuration
+  - [ ] Subtask 4.8: Document system instruction rationale
+  - [ ] Subtask 4.9: Document shared SQLite database approach and session isolation strategy
+</tasks>
+  </story>
+
+  <acceptanceCriteria>
+1. **Agent Configuration**: Agent is configured with: Agent name: "Bob's Companion", Model: Gemini 2.5 Pro (`gemini-2.5-pro`), System instruction: "You are Bob's personal Companion agent. You coordinate plans on Bob's behalf...", SessionService: DatabaseSessionService with same SQLite file (`companion_sessions.db`), MemoryService: InMemoryMemoryService (non-persistent), Session ID: "bob_session"
+2. **Agent Instantiation**: Agent can be instantiated without errors
+3. **Agent Methods**: agent.run() method is available for processing messages
+4. **Session Persistence**: Session state persists across agent restarts (SQLite database)
+5. **Concurrent Operation**: Both agents can run concurrently without session conflicts
+6. **Capability Parity**: Bob's agent has identical capabilities to Alice's agent
+7. **Session Isolation**: Each agent uses separate session IDs to prevent state collision
+</acceptanceCriteria>
+
+  <artifacts>
+    <docs>
+      <doc path="docs/prd.md" title="Product Requirements Document" section="Companion Agent Capabilities (FR1-FR4)" snippet="Agent maintains a persistent identity associated with a specific user. Agent stores and retrieves user context from memory. Agent enforces a Trusted Contact list to control access to its MCP tools." />
+      <doc path="docs/architecture.md" title="Architecture Document" section="Technology Stack Details" snippet="Google ADK v1.19.0+ for agent framework. Gemini 2.5 Pro (gemini-2.5-pro) as LLM. DatabaseSessionService (SQLite) for session persistence. InMemoryMemoryService for long-term memory (non-persistent)." />
+      <doc path="docs/architecture.md" title="Architecture Document" section="ADR-001: Gemini 2.5 Pro" snippet="Use Gemini 2.5 Pro (stable, released June 2025) instead of Gemini 3 Pro preview for hackathon stability. Demo reliability outweighs marginal capability gains." />
+      <doc path="docs/architecture.md" title="Architecture Document" section="ADR-002: SQLite Session Persistence" snippet="Use DatabaseSessionService with SQLite. Sessions persist across demo restarts. No server setup required. Easy to inspect data during development." />
+      <doc path="docs/architecture.md" title="Architecture Document" section="ADR-004: InMemory Long-Term Memory" snippet="Use InMemoryMemoryService (non-persistent). Simpler implementation, no cloud dependencies. Agents don't remember across application restarts (acceptable for MVP)." />
+      <doc path="docs/architecture.md" title="Architecture Document" section="Project Structure" snippet="bob_companion/ directory with __init__.py and agent.py. Shared SQLite database file companion_sessions.db in project root. Session IDs: alice_session and bob_session for isolation." />
+      <doc path="docs/epics.md" title="Epics Document" section="Story 2.3: Initialize Bob's Companion Agent" snippet="Duplicate Alice's setup with Bob-specific configuration. Both agents share same companion_sessions.db but different session IDs. Session ID: bob_session. Agent name: Bob's Companion. Model: gemini-2.5-pro." />
+      <doc path="docs/ux-design-specification.md" title="UX Design Specification" section="Design System Foundation" snippet="Gradio Base Theme + Custom CSS. Clean & Minimal style. Chat-centric interface similar to ChatGPT/Claude." />
+    </docs>
+    <code>
+      <artifact path="alice_companion/agent.py" kind="reference_implementation" symbol="agent, run, runner" lines="1-81" reason="Reference implementation for Bob's agent. Shows ADK Agent initialization pattern, Runner setup, module-level run() function, and SqliteSessionService usage." />
+      <artifact path="alice_companion/sqlite_session_service.py" kind="service" symbol="SqliteSessionService" lines="1-249" reason="Custom SQLite session service implementing BaseSessionService. REUSE this service for Bob's agent - import from alice_companion or move to shared/. Provides session persistence via SQLite database." />
+      <artifact path="bob_companion/__init__.py" kind="package" symbol="__init__" lines="1" reason="Package marker exists. Bob's agent.py needs to be created following Alice's pattern." />
+      <artifact path="tests/verify_alice_agent.py" kind="test" symbol="check_ac1_agent_configuration, check_ac2_agent_instantiation, check_ac3_agent_methods, check_ac4_session_persistence" lines="1-275" reason="Verification script pattern to follow for Bob's agent. Tests AC1-AC4: configuration, instantiation, methods, session persistence. Create tests/verify_bob_agent.py following this pattern." />
+      <artifact path="tests/test_alice_agent.py" kind="test" symbol="TestAliceAgentInitialization, TestAliceAgentRun" lines="1-55" reason="Unit test pattern for agent initialization and run() method. Create tests/test_bob_agent.py following this pattern." />
+    </code>
+    <dependencies>
+      <python>
+        <package name="google-adk" version=">=1.19.0" purpose="Agent framework for ADK Agent, Runner, and session/memory services" />
+        <package name="mcp" version=">=1.22.0" purpose="MCP Python SDK for tool exposure and calling (future stories)" />
+        <package name="gradio" purpose="Web UI framework for split-screen demo interface (future stories)" />
+        <package name="python-dotenv" purpose="Environment variable management for API keys" />
+      </python>
+    </dependencies>
+  </artifacts>
+
+  <constraints>
+    <constraint>Agent Framework: Use Google ADK (Agent Development Kit) for agent initialization</constraint>
+    <constraint>Model Selection: Use Gemini 2.5 Pro (gemini-2.5-pro) for stability, not Gemini 3 Pro preview (ADR-001)</constraint>
+    <constraint>Session Service: Use SqliteSessionService with same SQLite database file as Alice (shared database, separate sessions)</constraint>
+    <constraint>Memory Service: Use InMemoryMemoryService for long-term memory (non-persistent, ADR-004)</constraint>
+    <constraint>System Instruction: Should emphasize coordination, privacy, and natural conversation (Bob-specific)</constraint>
+    <constraint>Session ID: Use "bob_session" to prevent state collision with Alice's agent</constraint>
+    <constraint>Database File: Same SQLite file companion_sessions.db in project root (shared with Alice's agent)</constraint>
+    <constraint>Concurrent Operation: Both agents must be able to run simultaneously without conflicts</constraint>
+    <constraint>Code Reuse: REUSE SqliteSessionService from alice_companion - don't recreate. Import from alice_companion or move to shared/</constraint>
+    <constraint>Agent Name: Must be valid identifier (bobs_companion), display name in description ("Bob's Companion")</constraint>
+    <constraint>Architectural Pattern: Agent uses module-level run() function that wraps runner.run_async() - follow same pattern for Bob</constraint>
+  </constraints>
+  <interfaces>
+    <interface name="SqliteSessionService" kind="class" signature="class SqliteSessionService(BaseSessionService): def __init__(self, db_path: str)" path="alice_companion/sqlite_session_service.py" />
+    <interface name="Agent.run()" kind="function" signature="def run(message: str) -> str" path="alice_companion/agent.py" />
+    <interface name="Runner.run_async()" kind="async_method" signature="async def run_async(user_id: str, session_id: str, new_message: Content)" path="google.adk" />
+    <interface name="Agent" kind="class" signature="Agent(name: str, model: str, instruction: str, description: str)" path="google.adk" />
+    <interface name="Runner" kind="class" signature="Runner(app_name: str, agent: Agent, session_service: BaseSessionService, memory_service: BaseMemoryService)" path="google.adk" />
+  </interfaces>
+  <tests>
+    <standards>Testing follows Epic 1 verification pattern: Create tests/verify_bob_agent.py script that validates all acceptance criteria before marking tasks complete. Use unittest framework for test_bob_agent.py. Test coverage includes: agent configuration, instantiation, run() method availability, session persistence, concurrent operation, and session isolation. Always run verification script before marking tasks complete (Epic 1 retrospective action item).</standards>
+    <locations>tests/verify_bob_agent.py (verification script), tests/test_bob_agent.py (unit tests)</locations>
+    <ideas>
+      <idea ac_id="AC1">Test agent configuration: Verify agent.name == "bobs_companion", agent.model == "gemini-2.5-pro", system instruction contains "Bob's personal Companion", session_service is SqliteSessionService, memory_service is InMemoryMemoryService, SESSION_ID == "bob_session"</idea>
+      <idea ac_id="AC2">Test agent instantiation: Import agent, verify it's not None, verify required attributes (name, model, instruction) exist</idea>
+      <idea ac_id="AC3">Test agent.run() method: Verify run() function exists and is callable, test with simple message ("Hello")</idea>
+      <idea ac_id="AC4">Test session persistence: Create session with test state, retrieve session, simulate restart by creating new service instance, verify state persists</idea>
+      <idea ac_id="AC5">Test concurrent operation: Import both Alice and Bob agents, run both simultaneously, verify no database locking or session conflicts</idea>
+      <idea ac_id="AC6">Test capability parity: Compare Bob's agent structure with Alice's - verify same methods, same Runner pattern, same service types</idea>
+      <idea ac_id="AC7">Test session isolation: Create sessions for both Alice and Bob with different data, verify Alice's data not accessible to Bob's agent and vice versa</idea>
+    </ideas>
+  </tests>
+</story-context>
+
