@@ -18,8 +18,6 @@ try:
     
     if api_key and len(api_key) > 0:
         print("✓ GOOGLE_API_KEY loaded successfully")
-        print("✓ Key length:", len(api_key), "characters")
-        print("✓ Key format:", "Valid" if api_key.startswith("AIza") else "Unknown format")
         print("\n✅ Secrets verification: OK")
         sys.exit(0)
     else:
