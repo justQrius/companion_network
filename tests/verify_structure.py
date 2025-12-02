@@ -1,5 +1,6 @@
 import os
 import sys
+from pathlib import Path
 
 def check_path(path, description):
     if os.path.exists(path):
@@ -10,7 +11,8 @@ def check_path(path, description):
         return False
 
 def main():
-    project_root = os.getcwd()
+    # Use script location to reliably find project root, regardless of CWD
+    project_root = Path(__file__).parent.parent
     print(f"Verifying project structure in: {project_root}")
 
     checks = [
@@ -25,7 +27,7 @@ def main():
 
     all_passed = True
     for path, desc in checks:
-        if not check_path(os.path.join(project_root, path), desc):
+        if not check_path(project_root / path, desc):
             all_passed = False
 
     if all_passed:
