@@ -55,16 +55,13 @@ coverage.xml
 
 # Agent and Tool Configurations
 .claude/
-.cursor/
 context/
-.agent
-.bmad
-.gemini
-docs
-
-tests
-
 
 # Environment Variables (CRITICAL - DO NOT COMMIT SECRETS)
 .env
+
+# Databases (local dev only)
+*.db
+*.sqlite
+*.sqlite3
 
