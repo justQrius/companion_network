@@ -6,6 +6,7 @@ for Alice's Companion agent, enabling session persistence across restarts.
 
 import sqlite3
 import json
+from datetime import datetime
 from pathlib import Path
 from typing import Optional, Dict, Any, List
 from google.adk.sessions import BaseSessionService, Session, State
@@ -230,10 +231,13 @@ class SqliteSessionService(BaseSessionService):
         if isinstance(session.state, dict):
             if 'events' not in session.state:
                 session.state['events'] = []
-            session.state['events'].append({
+            # Store event with proper timestamp and serializable data
+            event_data = {
                 'type': type(event).__name__,
-                'timestamp': str(event) if hasattr(event, '__str__') else repr(event)
-            })
+                'timestamp': datetime.now().isoformat(),
+                'data': str(event) if isinstance(event, (str, int, float, bool, type(None))) else repr(event)
+            }
+            session.state['events'].append(event_data)
             await self.update_session_state(
                 session.app_name,
                 session.user_id,
