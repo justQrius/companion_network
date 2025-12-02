@@ -53,10 +53,6 @@ coverage.xml
 .hypothesis/
 .pytest_cache/
 
-# Agent and Tool Configurations
-.claude/
-context/
-
 # Environment Variables (CRITICAL - DO NOT COMMIT SECRETS)
 .env
 
