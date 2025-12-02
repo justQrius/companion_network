@@ -1,0 +1,206 @@
+<story-context id=".bmad/bmm/workflows/4-implementation/story-context/template" v="1.0">
+  <metadata>
+    <epicId>1</epicId>
+    <storyId>3</storyId>
+    <title>Install Core Dependencies</title>
+    <status>drafted</status>
+    <generatedAt>2025-12-01</generatedAt>
+    <generator>BMAD Story Context Workflow</generator>
+    <sourceStoryPath>docs/sprint-artifacts/1-3-install-core-dependencies.md</sourceStoryPath>
+  </metadata>
+
+  <story>
+    <asA>Developer</asA>
+    <iWant>all necessary Python packages installed with locked dependencies</iWant>
+    <soThat>I can use Google ADK, MCP SDK, Gradio, and environment management with reproducible builds across all development environments</soThat>
+    <tasks>
+- [ ] Task 1: Install Core Dependencies with UV (AC: 1)
+  - [ ] Subtask 1.1: Ensure virtual environment is activated (`.venv`)
+  - [ ] Subtask 1.2: Run `uv pip install google-adk mcp[cli] gradio python-dotenv`
+  - [ ] Subtask 1.3: Verify installation with `uv pip list` command
+  
+- [ ] Task 2: Generate and Verify Lock File (AC: 2)
+  - [ ] Subtask 2.1: Verify `uv.lock` was automatically generated
+  - [ ] Subtask 2.2: Inspect lock file to confirm all transitive dependencies are captured
+  
+- [ ] Task 3: Commit Lock File to Git (AC: 3)
+  - [ ] Subtask 3.1: Add `uv.lock` to Git staging area
+  - [ ] Subtask 3.2: Commit with message: "Add dependency lock file for reproducible builds"
+  - [ ] Subtask 3.3: Verify lock file is tracked (`git log -- uv.lock` shows commit)
+  
+- [ ] Task 4: Verify Package Imports (AC: 4)
+  - [ ] Subtask 4.1: Create verification script `tests/verify_dependencies.py`
+  - [ ] Subtask 4.2: Test import statements for all 4 core packages
+  - [ ] Subtask 4.3: Run verification script and confirm no import errors
+</tasks>
+  </story>
+
+  <acceptanceCriteria>
+1. **Core Packages Installed**: Running `uv pip list` shows `google-adk >= 1.19.0`, `mcp[cli] >= 1.22.0`, `gradio` (latest stable), and `python-dotenv`.
+2. **Lock File Generated**: The `uv.lock` file exists in the project root with exact dependency versions.
+3. **Lock File Committed**: `uv.lock` is tracked by Git (ensures reproducibility across environments).
+4. **Dependencies Verified**: All 4 core packages can be imported in Python without errors.
+</acceptanceCriteria>
+
+  <artifacts>
+    <docs>
+      <doc>
+        <path>docs/architecture.md</path>
+        <title>Architecture Document - Dependency Manager Decision</title>
+        <section>ADR-005: Dependency Manager</section>
+        <snippet>Use `uv` for ultra-fast (10-100x faster than pip) package management with unified tooling. Installation command: `uv pip install google-adk mcp[cli] gradio python-dotenv`</snippet>
+      </doc>
+      <doc>
+        <path>docs/architecture.md</path>
+        <title>Architecture Document - Lock File Strategy</title>
+        <section>Version Control Strategy</section>
+        <snippet>**CRITICAL**: Always commit `uv.lock` to ensure exact dependency versions for reproducibility. Lock file ensures exact same versions across all development environments.</snippet>
+      </doc>
+      <doc>
+        <path>docs/sprint-artifacts/tech-spec-epic-1.md</path>
+        <title>Epic 1 Tech Spec - Core Libraries</title>
+        <section>Dependencies and Integrations</section>
+        <snippet>Core Libraries: `google-adk >= 1.19.0` (Agent framework with A2A support), `mcp[cli] >= 1.22.0` (MCP Python SDK with server/client capabilities), `gradio` (latest stable - UI framework), `python-dotenv` (environment variable management). AC3 Verification: `uv pip list` must show all required packages.</snippet>
+      </doc>
+      <doc>
+        <path>docs/epics.md</path>
+        <title>Epics - Story 1.3 Specification</title>
+        <section>Epic 1: Foundation & Project Setup</section>
+        <snippet>Installation Behavior: `uv` automatically resolves dependencies and creates lock file. Reproducibility Mandate: Lock file ensures exact same versions across all development environments.</snippet>
+      </doc>
+      <doc>
+        <path>docs/prd.md</path>
+        <title>Product Requirements Document - Technical Stack</title>
+        <section>MVP Technical Stack</section>
+        <snippet>Technical Stack includes Google ADK for agent framework, Gemini 2.5 Pro as the LLM, MCP (Python SDK) for tool exposure and calling, Gradio for UI, and uv for dependency management (10-100x faster than pip).</snippet>
+      </doc>
+    </docs>
+    <code>
+      <artifact>
+        <path>tests/verify_structure.py</path>
+        <kind>test</kind>
+        <symbol>check_path, main</symbol>
+        <lines>1-40</lines>
+        <reason>Verification script pattern established in Story 1.2 - follow similar pattern for dependency verification with check functions and exit code handling</reason>
+      </artifact>
+      <artifact>
+        <path>alice_companion/__init__.py</path>
+        <kind>package marker</kind>
+        <symbol>N/A</symbol>
+        <lines>N/A</lines>
+        <reason>Existing package structure ready for dependency imports - dependencies will be installed into .venv for these packages to use</reason>
+      </artifact>
+      <artifact>
+        <path>bob_companion/__init__.py</path>
+        <kind>package marker</kind>
+        <symbol>N/A</symbol>
+        <lines>N/A</lines>
+        <reason>Existing package structure ready for dependency imports</reason>
+      </artifact>
+      <artifact>
+        <path>shared/__init__.py</path>
+        <kind>package marker</kind>
+        <symbol>N/A</symbol>
+        <lines>N/A</lines>
+        <reason>Existing package structure ready for dependency imports</reason>
+      </artifact>
+      <artifact>
+        <path>app.py</path>
+        <kind>entry point</kind>
+        <symbol>N/A</symbol>
+        <lines>N/A</lines>
+        <reason>Main application entry point created in Story 1.2 - dependencies needed before implementation</reason>
+      </artifact>
+    </code>
+    <dependencies>
+      <python>
+        <runtime>Python 3.10+ (Required by Google ADK)</runtime>
+        <package_manager>uv (ultra-fast, 10-100x faster than pip)</package_manager>
+        <venv>.venv (created in Story 1.1, ready for package installation)</venv>
+      </python>
+      <core_packages>
+        <package name="google-adk" version=">= 1.19.0" purpose="Agent framework with A2A support" />
+        <package name="mcp[cli]" version=">= 1.22.0" purpose="MCP Python SDK with server/client capabilities" />
+        <package name="gradio" version="latest stable" purpose="UI framework for split-screen demo interface" />
+        <package name="python-dotenv" version="latest" purpose="Environment variable management for secrets" />
+      </core_packages>
+      <lock_file>
+        <path>uv.lock</path>
+        <purpose>Exact dependency versions for reproducible builds</purpose>
+        <git_tracking>MUST be committed to version control</git_tracking>
+      </lock_file>
+    </dependencies>
+  </artifacts>
+
+  <constraints>
+- **Dependency Manager**: MUST use `uv` not pip (Architecture ADR-005)
+- **Lock File Commitment**: **CRITICAL** - Always commit `uv.lock` to version control for reproducibility
+- **Virtual Environment**: Packages MUST be installed into `.venv` directory (isolated environment from Story 1.1)
+- **Version Requirements**: Minimum versions specified for google-adk (>= 1.19.0) and mcp (>= 1.22.0)
+- **Installation Command**: Exact command per Architecture doc: `uv pip install google-adk mcp[cli] gradio python-dotenv`
+- **Verification Standard**: All 4 core packages must be importable in Python without errors
+- **Git Tracking**: `uv.lock` must be added to Git staging and committed (reproducible builds mandate)
+</constraints>
+
+  <interfaces>
+    <interface>
+      <name>uv pip install</name>
+      <kind>CLI command</kind>
+      <signature>uv pip install google-adk mcp[cli] gradio python-dotenv</signature>
+      <path>Command line (PowerShell/Bash)</path>
+    </interface>
+    <interface>
+      <name>uv pip list</name>
+      <kind>CLI command</kind>
+      <signature>uv pip list</signature>
+      <path>Command line - used for verification of installed packages</path>
+    </interface>
+    <interface>
+      <name>git log -- uv.lock</name>
+      <kind>CLI command</kind>
+      <signature>git log -- uv.lock</signature>
+      <path>Command line - used to verify lock file is tracked in Git</path>
+    </interface>
+  </interfaces>
+
+  <tests>
+    <standards>
+Follow the verification script pattern established in Story 1.2 (`tests/verify_structure.py`). Create `tests/verify_dependencies.py` that:
+- Imports each of the 4 core packages (google-adk, mcp, gradio, dotenv)
+- Prints success confirmation for each successful import
+- Returns non-zero exit code on any import failure
+- Uses check functions and clear output formatting (✅/❌)
+- Follows Python testing best practices with sys.exit(0) for success, sys.exit(1) for failure
+</standards>
+    <locations>
+- tests/verify_dependencies.py (new file to create)
+- tests/ directory already exists with verify_structure.py pattern to follow
+</locations>
+    <ideas>
+**Test Idea 1: Package Import Verification (AC #4)**
+- Test: Run Python script that imports `google.adk`, `mcp`, `gradio`, and `dotenv`
+- Expected: All imports succeed without ImportError
+- Maps to: AC4 (Dependencies Verified)
+
+**Test Idea 2: Package Version Check (AC #1)**
+- Test: Run `uv pip list` and parse output for google-adk >= 1.19.0 and mcp >= 1.22.0
+- Expected: Both packages present with correct minimum versions
+- Maps to: AC1 (Core Packages Installed)
+
+**Test Idea 3: Lock File Existence (AC #2)**
+- Test: Check for existence of `uv.lock` file in project root
+- Expected: File exists and is non-empty
+- Maps to: AC2 (Lock File Generated)
+
+**Test Idea 4: Lock File Git Tracking (AC #3)**
+- Test: Run `git log -- uv.lock` to verify commit history
+- Expected: Command shows at least one commit containing uv.lock
+- Maps to: AC3 (Lock File Committed)
+
+**Test Idea 5: Virtual Environment Isolation**
+- Test: Verify packages are installed in `.venv` not system Python
+- Expected: `which python` or `where python` points to .venv directory
+- Maps to: General best practice from Story 1.1 context
+</ideas>
+  </tests>
+</story-context>
