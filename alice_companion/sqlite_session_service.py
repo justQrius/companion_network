@@ -128,7 +128,7 @@ class SqliteSessionService(BaseSessionService):
         app_name: str,
         user_id: str,
         session_id: str,
-        state: State
+        state: Optional[State] = None
     ) -> None:
         """Update session state.
         
@@ -136,9 +136,9 @@ class SqliteSessionService(BaseSessionService):
             app_name: Application name
             user_id: User identifier
             session_id: Session identifier
-            state: New session state
+            state: New session state (optional, defaults to empty dict if None)
         """
-        state_dict = state if isinstance(state, dict) else state.__dict__
+        state_dict = state if isinstance(state, dict) else (state.__dict__ if state else {})
         state_json = json.dumps(state_dict)
         
         conn = sqlite3.connect(self.db_path)
