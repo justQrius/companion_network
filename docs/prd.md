@@ -441,7 +441,6 @@ Each Companion exposes these MCP tools to other Companions:
 - **Natural Language:** Agents must communicate in natural, conversational tone, not JSON dumps (except in the network log).
 
 This section shapes all functional and non-functional requirements below.
-{{/if}}
 
 ---
 

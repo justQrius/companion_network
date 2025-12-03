@@ -39,6 +39,18 @@ workflow_status:
   - phase: 1
     name: "Planning"
     items:
+      - id: "prd"
+        status: "docs/prd.md"
+        agent: "pm"
+
+  - phase: 2
+    name: "Solutioning"
+    items:
+      - id: "create-architecture"
+        status: "docs/architecture.md"
+        agent: "architect"
+      - id: "create-epics-and-stories"
+        status: "docs/epics.md"
         agent: "pm"
       - id: "test-design"
         status: "recommended"
