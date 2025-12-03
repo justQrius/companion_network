@@ -23,6 +23,8 @@ from shared.coordination import (
     synthesize_recommendation,
     handle_no_overlaps
 )
+from shared.models import EventProposal
+from datetime import datetime
 
 # Configuration constants
 AGENT_NAME = "alices_companion"  # Valid identifier (spaces/special chars not allowed)
@@ -86,12 +88,27 @@ When Alice makes a coordination request, you should:
    - If no overlaps exist, present result["alternatives"]["suggestion"] and ask for flexibility
    - Always handle errors gracefully and provide clear feedback
 
+7. **Event Proposal to User**: After coordinating mutual availability and getting a recommendation,
+   you should propose the event to Alice for confirmation using the propose_event_to_user() helper function.
+   This function:
+   - Creates an EventProposal from the coordination recommendation
+   - Formats a natural language message with time, duration, participant, and context
+   - Stores the proposal in session state as "pending" awaiting Alice's confirmation
+   - Presents the proposal message to Alice with a call to action
+   - Example: After coordinate_mutual_availability() succeeds, call propose_event_to_user(recommendation, "bob")
+   - The proposal waits for Alice's next message ("yes", "confirm", "sounds good") to proceed
+
 7. **Acknowledge Naturally**: Respond with natural language acknowledgment that shows understanding:
    - Example: "I'll check your availability for this weekend and coordinate with Bob's Companion to find a time for dinner..."
    - Use conversational tone, not JSON or structured formats
 
 8. **Identify Contact Need**: Determine which Companion agent you need to contact for coordination
    (e.g., if Alice mentions "Bob", you'll need to contact Bob's Companion).
+
+8. **User Confirmation Handling**: When you present an event proposal to Alice, wait for her confirmation
+   in her next message. Use the handle_user_confirmation() helper function to check if Alice's response
+   indicates approval. Confirmation keywords include: "yes", "confirm", "sounds good", "go ahead", "proceed".
+   If Alice confirms, you can proceed with calling Bob's Companion via A2A to finalize the event.
 
 Remember: Use natural language understanding - Alice doesn't need to use specific commands or syntax.
 You interpret her intent from conversational messages. Always handle coordination errors gracefully and provide
@@ -599,6 +616,551 @@ async def coordinate_mutual_availability(
         "slots": prioritized_slots,
         "alice_preferences": alice_preferences,
         "bob_preferences": bob_preferences
+    }
+
+
+async def create_event_proposal(
+    recommendation: dict,
+    recipient_user_id: str = "bob",
+    proposer_user_id: str = "alice"
+) -> dict:
+    """Create an EventProposal object from a coordination recommendation and store it in session state.
+    
+    This function implements event proposal creation following Story 2.10 requirements.
+    It extracts proposal details from the recommendation returned by coordinate_mutual_availability(),
+    creates an EventProposal dataclass instance, and stores it in session state using
+    DatabaseSessionService.
+    
+    Integration Pattern (Story 2.10):
+    - Uses recommendation dict from coordinate_mutual_availability() (Story 2.9)
+    - Creates EventProposal using dataclass from shared/models.py (Story 2.1)
+    - Stores proposal in session state under key "event_proposal:{event_id}"
+    - Sets proposal status to "pending" awaiting user confirmation
+    
+    Args:
+        recommendation: Dictionary from coordinate_mutual_availability() containing:
+            - "success": bool
+            - "recommendation": Natural language recommendation string
+            - "slots": List of prioritized ISO 8601 time range strings
+            - "alice_preferences": Alice's preferences dict
+            - "bob_preferences": Bob's preferences dict
+        recipient_user_id: User ID of the person receiving the proposal (default: "bob")
+        proposer_user_id: User ID of the person proposing (default: "alice")
+        
+    Returns:
+        Dictionary with keys:
+        - "success": bool indicating if proposal was created successfully
+        - "event_proposal": EventProposal dataclass instance (if successful)
+        - "event_id": Unique event identifier (if successful)
+        - "error": Error message (if creation failed)
+        
+    Example:
+        recommendation = await coordinate_mutual_availability("this weekend", "bob")
+        if recommendation.get("success"):
+            result = await create_event_proposal(recommendation, "bob", "alice")
+            if result.get("success"):
+                event_id = result["event_id"]
+                proposal = result["event_proposal"]
+    """
+    # Get current session to access user context and store proposal
+    session = await session_service.get_session(
+        app_name="companion_network",
+        user_id=proposer_user_id,
+        session_id=SESSION_ID
+    )
+    
+    if not session or "user_context" not in session.state:
+        return {
+            "success": False,
+            "error": f"{proposer_user_id.capitalize()}'s user context not found in session state"
+        }
+    
+    # Validate trusted contact (AC8): Check if recipient is in proposer's trusted_contacts
+    user_context = session.state["user_context"]
+    trusted_contacts = user_context.get("trusted_contacts", [])
+    
+    if recipient_user_id not in trusted_contacts:
+        return {
+            "success": False,
+            "error": f"I can only coordinate with trusted contacts. {recipient_user_id.capitalize()} is not in your trusted contacts list."
+        }
+    
+    # Validate recommendation structure
+    if not recommendation.get("success") or not recommendation.get("slots"):
+        return {
+            "success": False,
+            "error": "Invalid recommendation: missing success flag or slots"
+        }
+    
+    # Extract proposal details from recommendation
+    slots = recommendation.get("slots", [])
+    if not slots:
+        return {
+            "success": False,
+            "error": "No available time slots in recommendation"
+        }
+    
+    # Use the first (best) slot for the proposal
+    best_slot = slots[0]
+    
+    # Parse slot to extract datetime
+    if '/' not in best_slot:
+        return {
+            "success": False,
+            "error": f"Invalid slot format: {best_slot}"
+        }
+    
+    try:
+        parts = best_slot.split('/')
+        if len(parts) != 2:
+            return {
+                "success": False,
+                "error": f"Invalid slot format: {best_slot}"
+            }
+        
+        start_datetime = datetime.fromisoformat(parts[0])
+        end_datetime = datetime.fromisoformat(parts[1])
+        
+        # Calculate duration in hours
+        duration_hours = (end_datetime - start_datetime).total_seconds() / 3600
+        
+        # Extract preferences for context
+        alice_preferences = recommendation.get("alice_preferences", {})
+        bob_preferences = recommendation.get("bob_preferences", {})
+        
+        # Generate unique event_id: evt_{timestamp}_{proposer}_{recipient}
+        timestamp_str = datetime.now().strftime("%Y%m%d%H%M%S")
+        event_id = f"evt_{timestamp_str}_{proposer_user_id}_{recipient_user_id}"
+        
+        # Create EventProposal details dict
+        proposal_details = {
+            "title": "Dinner",
+            "time": start_datetime.isoformat(),
+            "end_time": end_datetime.isoformat(),
+            "duration_hours": duration_hours,
+            "location": "",  # Can be filled later if needed
+            "participants": [proposer_user_id, recipient_user_id],
+            "recommendation_text": recommendation.get("recommendation", ""),
+            "alice_preferences": alice_preferences,
+            "bob_preferences": bob_preferences
+        }
+        
+        # Create EventProposal dataclass instance
+        event_proposal = EventProposal(
+            event_id=event_id,
+            proposer=proposer_user_id,
+            recipient=recipient_user_id,
+            status="pending",
+            timestamp=datetime.now().isoformat(),
+            details=proposal_details
+        )
+        
+        # Store proposal in session state under key "event_proposal:{event_id}"
+        state = session.state.copy()
+        proposal_key = f"event_proposal:{event_id}"
+        # Convert dataclass to dict for JSON serialization
+        from dataclasses import asdict
+        state[proposal_key] = asdict(event_proposal)
+        
+        # Update session state
+        await session_service.update_session_state(
+            app_name="companion_network",
+            user_id=proposer_user_id,
+            session_id=SESSION_ID,
+            state=state
+        )
+        
+        return {
+            "success": True,
+            "event_proposal": event_proposal,
+            "event_id": event_id
+        }
+        
+    except (ValueError, AttributeError) as e:
+        return {
+            "success": False,
+            "error": f"Error parsing slot or creating proposal: {str(e)}"
+        }
+
+
+def format_proposal_message(event_proposal: EventProposal) -> str:
+    """Format an EventProposal as a natural language message for the user.
+    
+    This function creates a conversational, natural language message from an
+    EventProposal dataclass. The message includes all required elements per
+    Story 2.10 AC1: proposed time, duration, participant, additional context,
+    and call to action.
+    
+    Integration Pattern (Story 2.10):
+    - Takes EventProposal dataclass from create_event_proposal()
+    - Formats details into human-readable natural language
+    - Returns message that can be presented to user via agent response
+    - Message is conversational, not JSON dump (AC4)
+    
+    Args:
+        event_proposal: EventProposal dataclass instance with proposal details
+        
+    Returns:
+        Natural language message string formatted for user presentation.
+        Includes: time, duration, participant, context, call to action.
+        
+    Example:
+        proposal = EventProposal(...)
+        message = format_proposal_message(proposal)
+        # Returns: "I found a great time for dinner with Bob: Saturday, December 7th at 7:00pm 
+        #           for 2 hours. Bob is in the mood for Italian cuisine. Should I confirm this with Bob?"
+    """
+    details = event_proposal.details
+    
+    # Extract time information
+    time_str = details.get("time", "")
+    if time_str:
+        try:
+            start_datetime = datetime.fromisoformat(time_str)
+            # Format as "Saturday, December 7th at 7:00pm"
+            day_name = start_datetime.strftime("%A")  # e.g., "Saturday"
+            month_name = start_datetime.strftime("%B")  # e.g., "December"
+            day = start_datetime.day
+            # Add ordinal suffix (1st, 2nd, 3rd, etc.)
+            if 10 <= day % 100 <= 20:
+                suffix = "th"
+            else:
+                suffix = {1: "st", 2: "nd", 3: "rd"}.get(day % 10, "th")
+            day_str = f"{day}{suffix}"
+            
+            hour = start_datetime.hour
+            minute = start_datetime.minute
+            # Format as 12-hour time with am/pm
+            if hour == 0:
+                time_display = f"12:{minute:02d}am"
+            elif hour < 12:
+                time_display = f"{hour}:{minute:02d}am"
+            elif hour == 12:
+                time_display = f"12:{minute:02d}pm"
+            else:
+                time_display = f"{hour - 12}:{minute:02d}pm"
+            
+            formatted_time = f"{day_name}, {month_name} {day_str} at {time_display}"
+        except (ValueError, AttributeError):
+            formatted_time = time_str
+    else:
+        formatted_time = "a time to be determined"
+    
+    # Extract duration
+    duration_hours = details.get("duration_hours", 2)
+    if duration_hours == 1:
+        duration_str = "1 hour"
+    else:
+        duration_str = f"{int(duration_hours)} hours"
+    
+    # Extract participant name
+    participants = details.get("participants", [])
+    recipient_id = event_proposal.recipient
+    # Capitalize first letter for display
+    participant_name = recipient_id.capitalize()
+    
+    # Extract additional context from preferences
+    context_parts = []
+    bob_preferences = details.get("bob_preferences", {})
+    cuisine_prefs = bob_preferences.get("cuisine", [])
+    if cuisine_prefs:
+        cuisine_str = ", ".join(cuisine_prefs[:2])  # Limit to 2 cuisines
+        context_parts.append(f"{participant_name} is in the mood for {cuisine_str}")
+    
+    # Build natural language message
+    message_parts = [
+        f"I found a great time for dinner with {participant_name}: {formatted_time} for {duration_str}."
+    ]
+    
+    # Add context if available
+    if context_parts:
+        message_parts.append(" ".join(context_parts) + ".")
+    
+    # Add call to action
+    message_parts.append(f"Should I confirm this with {participant_name}?")
+    
+    return " ".join(message_parts)
+
+
+async def propose_event_to_user(
+    recommendation: dict,
+    recipient_user_id: str = "bob",
+    proposer_user_id: str = "alice"
+) -> dict:
+    """Propose an event to the user by creating a proposal and formatting a natural language message.
+    
+    This helper function integrates event proposal creation with the agent flow. It:
+    1. Creates an EventProposal from the coordination recommendation
+    2. Formats a natural language message for the user
+    3. Returns both the proposal and message for the agent to present
+    
+    Integration Pattern (Story 2.10):
+    - Called after coordinate_mutual_availability() returns a successful recommendation
+    - Creates proposal using create_event_proposal()
+    - Formats message using format_proposal_message()
+    - Agent presents message to user and waits for confirmation
+    - Proposal is stored in session state as "pending"
+    
+    Args:
+        recommendation: Dictionary from coordinate_mutual_availability() with recommendation
+        recipient_user_id: User ID of the person receiving the proposal (default: "bob")
+        proposer_user_id: User ID of the person proposing (default: "alice")
+        
+    Returns:
+        Dictionary with keys:
+        - "success": bool indicating if proposal was created successfully
+        - "message": Natural language proposal message for user (if successful)
+        - "event_proposal": EventProposal instance (if successful)
+        - "event_id": Unique event identifier (if successful)
+        - "error": Error message (if creation failed)
+        
+    Example:
+        recommendation = await coordinate_mutual_availability("this weekend", "bob")
+        if recommendation.get("success"):
+            result = await propose_event_to_user(recommendation, "bob", "alice")
+            if result.get("success"):
+                # Present result["message"] to user
+                # Wait for user confirmation
+    """
+    # Create event proposal
+    proposal_result = await create_event_proposal(
+        recommendation,
+        recipient_user_id,
+        proposer_user_id
+    )
+    
+    if not proposal_result.get("success"):
+        return proposal_result
+    
+    # Format natural language message
+    event_proposal = proposal_result["event_proposal"]
+    message = format_proposal_message(event_proposal)
+    
+    return {
+        "success": True,
+        "message": message,
+        "event_proposal": event_proposal,
+        "event_id": proposal_result["event_id"]
+    }
+
+
+async def handle_user_confirmation(
+    user_message: str,
+    proposer_user_id: str = "alice"
+) -> dict:
+    """Check if user's message indicates confirmation of a pending event proposal.
+    
+    This function parses the user's message for confirmation keywords and retrieves
+    the pending EventProposal from session state. If confirmed, it updates the
+    proposal status and prepares for A2A communication with the other Companion.
+    
+    Integration Pattern (Story 2.10):
+    - Called after propose_event_to_user() presents proposal to user
+    - Checks user's next message for confirmation keywords
+    - Retrieves pending EventProposal from session state
+    - Updates proposal status based on user response
+    - If confirmed, prepares for A2A communication (Story 2.8 pattern)
+    
+    Confirmation Keywords (AC7):
+    - "yes", "confirm", "sounds good", "go ahead", "proceed"
+    - Case-insensitive matching
+    
+    Args:
+        user_message: User's message text to check for confirmation
+        proposer_user_id: User ID of the person who proposed (default: "alice")
+        
+    Returns:
+        Dictionary with keys:
+        - "confirmed": bool indicating if user confirmed
+        - "event_proposal": EventProposal instance if found and confirmed
+        - "event_id": Event ID if found
+        - "message": Status message
+        - "error": Error message if proposal not found or other error
+        
+    Example:
+        result = await handle_user_confirmation("yes, that sounds good", "alice")
+        if result.get("confirmed"):
+            # Proceed with A2A communication to finalize event
+    """
+    # Confirmation keywords (case-insensitive)
+    confirmation_keywords = [
+        "yes", "confirm", "sounds good", "go ahead", "proceed",
+        "sure", "ok", "okay", "yep", "yeah", "that works", "let's do it"
+    ]
+    
+    # Check if message contains confirmation keyword
+    user_message_lower = user_message.lower().strip()
+    is_confirmed = any(keyword in user_message_lower for keyword in confirmation_keywords)
+    
+    # Get current session to retrieve pending proposal
+    session = await session_service.get_session(
+        app_name="companion_network",
+        user_id=proposer_user_id,
+        session_id=SESSION_ID
+    )
+    
+    if not session:
+        return {
+            "confirmed": False,
+            "error": "Session not found"
+        }
+    
+    # Find pending EventProposal in session state
+    state = session.state
+    pending_proposal = None
+    pending_event_id = None
+    
+    # Search for event_proposal keys in session state
+    for key, value in state.items():
+        if key.startswith("event_proposal:"):
+            # Check if this is a pending proposal
+            if isinstance(value, dict) and value.get("status") == "pending":
+                # Check if this proposal belongs to the current user
+                if value.get("proposer") == proposer_user_id:
+                    pending_proposal = value
+                    pending_event_id = value.get("event_id")
+                    break
+    
+    if not pending_proposal:
+        return {
+            "confirmed": False,
+            "message": "No pending event proposal found. Please coordinate an event first."
+        }
+    
+    # If user confirmed, update proposal status
+    if is_confirmed:
+        # Update proposal status to "confirmed" (or "accepted" if that's the convention)
+        # Note: We'll keep it as "pending" until A2A communication succeeds
+        # But we can mark it as "user_confirmed" in a separate field
+        updated_proposal = pending_proposal.copy()
+        updated_proposal["status"] = "user_confirmed"  # Intermediate status
+        
+        # Update session state
+        proposal_key = f"event_proposal:{pending_event_id}"
+        state[proposal_key] = updated_proposal
+        
+        await session_service.update_session_state(
+            app_name="companion_network",
+            user_id=proposer_user_id,
+            session_id=SESSION_ID,
+            state=state
+        )
+        
+        # Reconstruct EventProposal dataclass for return
+        from dataclasses import asdict
+        event_proposal = EventProposal(**updated_proposal)
+        
+        return {
+            "confirmed": True,
+            "event_proposal": event_proposal,
+            "event_id": pending_event_id,
+            "message": "Event proposal confirmed. Ready to finalize with the other party."
+        }
+    else:
+        return {
+            "confirmed": False,
+            "message": "Event proposal not confirmed. Please respond with 'yes', 'confirm', or similar to proceed."
+        }
+
+
+async def finalize_event_with_other_companion(
+    event_proposal: EventProposal,
+    proposer_user_id: str = "alice"
+) -> dict:
+    """Finalize event by calling the other Companion's propose_event MCP tool via A2A.
+    
+    After the user confirms an event proposal, this function calls the other Companion's
+    propose_event MCP tool to finalize the event. This implements Story 2.10 AC9: A2A
+    communication initiation after user confirmation.
+    
+    Integration Pattern (Story 2.10):
+    - Called after handle_user_confirmation() returns confirmed=True
+    - Uses call_other_companion_tool() from Story 2.8 to call Bob's propose_event tool
+    - Passes event details (event_name, datetime, location, participants, requester)
+    - Handles A2A call response (accepted, declined, pending)
+    - Updates EventProposal status based on Bob's response
+    - Logs A2A call using shared/a2a_logging.py from Story 2.8
+    
+    Args:
+        event_proposal: EventProposal dataclass instance that was confirmed by user
+        proposer_user_id: User ID of the person who proposed (default: "alice")
+        
+    Returns:
+        Dictionary with keys:
+        - "success": bool indicating if A2A call succeeded
+        - "status": Event status from other Companion ("accepted", "declined", "pending")
+        - "message": Response message from other Companion
+        - "event_id": Event ID if accepted/pending
+        - "error": Error message if A2A call failed
+        
+    Example:
+        confirmation = await handle_user_confirmation("yes", "alice")
+        if confirmation.get("confirmed"):
+            result = await finalize_event_with_other_companion(confirmation["event_proposal"], "alice")
+            if result.get("success"):
+                # Event finalized, inform user of result
+    """
+    details = event_proposal.details
+    recipient_user_id = event_proposal.recipient
+    
+    # Extract event details for MCP tool call
+    event_name = details.get("title", "Dinner")
+    datetime_str = details.get("time", "")
+    location = details.get("location", "")
+    participants = details.get("participants", [])
+    
+    # Call Bob's propose_event MCP tool via A2A
+    a2a_result = await call_other_companion_tool(
+        "propose_event",
+        event_name=event_name,
+        datetime=datetime_str,
+        location=location,
+        participants=participants,
+        requester=proposer_user_id
+    )
+    
+    # Handle A2A call errors
+    if "error" in a2a_result:
+        return {
+            "success": False,
+            "error": a2a_result["error"]
+        }
+    
+    # Extract response from Bob's Companion
+    event_status = a2a_result.get("status", "pending")
+    response_message = a2a_result.get("message", "")
+    response_event_id = a2a_result.get("event_id", event_proposal.event_id)
+    
+    # Update EventProposal status based on Bob's response
+    session = await session_service.get_session(
+        app_name="companion_network",
+        user_id=proposer_user_id,
+        session_id=SESSION_ID
+    )
+    
+    if session:
+        state = session.state.copy()
+        proposal_key = f"event_proposal:{event_proposal.event_id}"
+        
+        if proposal_key in state:
+            # Update proposal status
+            updated_proposal = state[proposal_key].copy()
+            updated_proposal["status"] = event_status
+            state[proposal_key] = updated_proposal
+            
+            # Update session state
+            await session_service.update_session_state(
+                app_name="companion_network",
+                user_id=proposer_user_id,
+                session_id=SESSION_ID,
+                state=state
+            )
+    
+    return {
+        "success": True,
+        "status": event_status,
+        "message": response_message,
+        "event_id": response_event_id
     }
 
 
