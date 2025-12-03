@@ -6,6 +6,15 @@ and in-memory long-term memory, configured for coordination tasks.
 
 from pathlib import Path
 from dotenv import load_dotenv
+import warnings
+import logging
+from contextlib import redirect_stderr
+from io import StringIO
+
+# Suppress harmless ADK app name mismatch warning
+# ADK infers app name from Agent class file path, but we explicitly set app_name="companion_network"
+warnings.filterwarnings('ignore', message='.*App name mismatch.*')
+logging.getLogger('google.adk').setLevel(logging.ERROR)
 
 # Load environment variables from .env file
 load_dotenv()
@@ -129,12 +138,14 @@ agent = Agent(
 )
 
 # Create runner with session and memory services
-runner = Runner(
-    app_name="companion_network",
-    agent=agent,
-    session_service=session_service,
-    memory_service=memory_service
-)
+# Suppress harmless ADK app name mismatch warning (printed to stderr)
+with redirect_stderr(StringIO()):
+    runner = Runner(
+        app_name="companion_network",
+        agent=agent,
+        session_service=session_service,
+        memory_service=memory_service
+    )
 
 
 async def _initialize_user_context():

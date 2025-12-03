@@ -51,8 +51,9 @@ alice_mcp_thread = None
 bob_mcp_thread = None
 
 # Module-level chat history (persists during session)
-alice_chat_history: List[Tuple[str, str]] = []
-bob_chat_history: List[Tuple[str, str]] = []
+# Gradio 6.0+ requires dictionary format: [{"role": "user", "content": "..."}, {"role": "assistant", "content": "..."}]
+alice_chat_history: List[Dict[str, str]] = []
+bob_chat_history: List[Dict[str, str]] = []
 
 # Custom CSS for clean minimal styling
 CUSTOM_CSS = """
@@ -296,7 +297,7 @@ async def _run_bob_agent_async(message: str) -> str:
     return main_response
 
 
-async def handle_alice_input(message: str, history: List[Tuple[str, str]]) -> Tuple[List[Tuple[str, str]], str]:
+async def handle_alice_input(message: str, history: List[Dict[str, str]]) -> Tuple[List[Dict[str, str]], str]:
     """
     Async event handler for Alice's chat input.
     
@@ -306,7 +307,7 @@ async def handle_alice_input(message: str, history: List[Tuple[str, str]]) -> Tu
     
     Args:
         message: User message string from input textbox
-        history: Current chat history (List[Tuple[str, str]] format)
+        history: Current chat history (List[Dict[str, str]] format with 'role' and 'content' keys)
         
     Returns:
         Tuple of (updated_history, empty_string):
@@ -321,7 +322,9 @@ async def handle_alice_input(message: str, history: List[Tuple[str, str]]) -> Tu
         alice_chat_history = history.copy() if history else []
         
         # AC2: Show explicit "thinking..." indicator
-        alice_chat_history.append((message, "thinking..."))
+        # Gradio 6.0+ format: dictionary with 'role' and 'content' keys
+        alice_chat_history.append({"role": "user", "content": message})
+        alice_chat_history.append({"role": "assistant", "content": "thinking..."})
         
         try:
             # AC3, AC4: Call agent asynchronously and wait for response
@@ -330,7 +333,7 @@ async def handle_alice_input(message: str, history: List[Tuple[str, str]]) -> Tu
             
             # AC3: Append agent response to chat history
             # Update the last entry (replace "thinking..." with actual response)
-            alice_chat_history[-1] = (message, agent_response)
+            alice_chat_history[-1] = {"role": "assistant", "content": agent_response}
             
             # AC7: Chat history persists (stored in module-level variable)
             # AC6: Async handler prevents UI blocking
@@ -344,14 +347,14 @@ async def handle_alice_input(message: str, history: List[Tuple[str, str]]) -> Tu
             logger.error(f"Error in handle_alice_input: {e}", exc_info=True)
             
             # Update history with error message (replace "thinking..." with error)
-            alice_chat_history[-1] = (message, error_message)
+            alice_chat_history[-1] = {"role": "assistant", "content": error_message}
             return alice_chat_history, ""
     
     # Empty message, return unchanged
     return history, ""
 
 
-async def handle_bob_input(message: str, history: List[Tuple[str, str]]) -> Tuple[List[Tuple[str, str]], str]:
+async def handle_bob_input(message: str, history: List[Dict[str, str]]) -> Tuple[List[Dict[str, str]], str]:
     """
     Async event handler for Bob's chat input.
     
@@ -361,7 +364,7 @@ async def handle_bob_input(message: str, history: List[Tuple[str, str]]) -> Tupl
     
     Args:
         message: User message string from input textbox
-        history: Current chat history (List[Tuple[str, str]] format)
+        history: Current chat history (List[Dict[str, str]] format with 'role' and 'content' keys)
         
     Returns:
         Tuple of (updated_history, empty_string):
@@ -376,7 +379,9 @@ async def handle_bob_input(message: str, history: List[Tuple[str, str]]) -> Tupl
         bob_chat_history = history.copy() if history else []
         
         # AC2: Show explicit "thinking..." indicator
-        bob_chat_history.append((message, "thinking..."))
+        # Gradio 6.0+ format: dictionary with 'role' and 'content' keys
+        bob_chat_history.append({"role": "user", "content": message})
+        bob_chat_history.append({"role": "assistant", "content": "thinking..."})
         
         try:
             # AC3, AC4: Call agent asynchronously and wait for response
@@ -385,7 +390,7 @@ async def handle_bob_input(message: str, history: List[Tuple[str, str]]) -> Tupl
             
             # AC3: Append agent response to chat history
             # Update the last entry (replace "thinking..." with actual response)
-            bob_chat_history[-1] = (message, agent_response)
+            bob_chat_history[-1] = {"role": "assistant", "content": agent_response}
             
             # AC7: Chat history persists (stored in module-level variable)
             # AC6: Async handler prevents UI blocking
@@ -399,7 +404,7 @@ async def handle_bob_input(message: str, history: List[Tuple[str, str]]) -> Tupl
             logger.error(f"Error in handle_bob_input: {e}", exc_info=True)
             
             # Update history with error message (replace "thinking..." with error)
-            bob_chat_history[-1] = (message, error_message)
+            bob_chat_history[-1] = {"role": "assistant", "content": error_message}
             return bob_chat_history, ""
     
     # Empty message, return unchanged
@@ -603,7 +608,7 @@ def create_layout():
     Returns:
         gr.Blocks: Configured Gradio Blocks interface
     """
-    with gr.Blocks() as app:
+    with gr.Blocks(title="Companion Network - A2A Coordination Demo") as app:
         # Inject custom CSS using gr.HTML (works in all Gradio versions)
         gr.HTML(f"<style>{CUSTOM_CSS}</style>", visible=False)
         
@@ -619,6 +624,7 @@ def create_layout():
                 gr.Markdown("### 👩 Alice's Companion", elem_classes=["panel-label"])
                 
                 # Chat history display (conversational format)
+                # Gradio 6.0+ uses dictionary format with 'role' and 'content' keys
                 alice_chatbot = gr.Chatbot(
                     label="Chat History",
                     height=400,
@@ -654,6 +660,7 @@ def create_layout():
                 gr.Markdown("### 👨 Bob's Companion", elem_classes=["panel-label"])
                 
                 # Chat history display (conversational format)
+                # Gradio 6.0+ uses dictionary format with 'role' and 'content' keys
                 bob_chatbot = gr.Chatbot(
                     label="Chat History",
                     height=400,
@@ -694,11 +701,9 @@ def create_layout():
                     show_label=False
                 )
                 # Real-time updates: poll every 500ms (per NFR: updates within 500ms of A2A call completion)
-                app.load(
-                    fn=update_network_monitor,
-                    outputs=network_monitor,
-                    every=0.5  # 500ms polling interval
-                )
+                # Use gr.Timer for periodic updates in Gradio 6.0+
+                timer = gr.Timer(value=0.5)  # 500ms polling interval
+                timer.tick(fn=update_network_monitor, outputs=network_monitor)
     
     return app
 
@@ -924,8 +929,8 @@ def main():
         logger.info("   Open your browser to: http://localhost:7860")
         logger.info("=" * 60)
         
-        # Note: title parameter may not be supported in older Gradio versions
-        # CSS is injected via gr.HTML() in create_layout() instead of css parameter
+        # Note: CSS is injected via gr.HTML() in create_layout() instead of css parameter
+        # Title is set in gr.Blocks() constructor above
         app.launch(
             server_name="localhost",
             server_port=7860,

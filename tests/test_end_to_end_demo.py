@@ -595,7 +595,7 @@ class TestEndToEndDemoScenario:
         assert "sharing_rules" in alice_context, "FR29: Sharing rules not maintained"
         
         events = alice_session.state.get("events", [])
-        assert len(events) >= 0, "FR30: Event lifecycle not tracked"
+        assert len(events) > 0, "FR30: Event lifecycle not tracked"
         fr_coverage["FR26-FR31 (Data & State)"] = True
         
         # Verify all FR groups are covered

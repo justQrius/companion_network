@@ -405,7 +405,11 @@ async def check_ac8_nfr_satisfaction() -> bool:
     
     try:
         # Privacy NFR: Sharing rules enforced
-        alice_session = asyncio.run(alice_runner.session_service.get_session("alice_session"))
+        alice_session = await alice_runner.session_service.get_session(
+            app_name="companion_network",
+            user_id="alice",
+            session_id="alice_session"
+        )
         alice_context = alice_session.state.get("user_context", {})
         sharing_rules = alice_context.get("sharing_rules", {})
         
@@ -526,7 +530,7 @@ async def check_ac10_fr_coverage() -> bool:
         assert "sharing_rules" in alice_context, "FR29: Sharing rules not maintained"
         
         events_list = alice_session.state.get("events", [])
-        assert len(events_list) >= 0, "FR30: Event lifecycle not tracked"
+        assert len(events_list) > 0, "FR30: Event lifecycle not tracked"
         fr_coverage["FR26-FR31 (Data & State)"] = True
         
         all_covered = all(fr_coverage.values())
