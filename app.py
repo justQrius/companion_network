@@ -16,12 +16,23 @@ from typing import List, Tuple, Dict, Any
 import logging
 import json
 from datetime import datetime
+import threading
+import time
+import httpx
+import asyncio
+from pathlib import Path
+from dotenv import load_dotenv
+
+# Load environment variables from .env file
+load_dotenv()
 
 # Import agent modules
 from alice_companion import agent as alice_agent_module
 from bob_companion import agent as bob_agent_module
 from alice_companion.user_context import get_alice_context
 from bob_companion.user_context import get_bob_context
+from alice_companion.http_endpoint import run_server as start_alice_mcp_server
+from bob_companion.http_endpoint import run_server as start_bob_mcp_server
 
 # Configure logging
 logging.basicConfig(level=logging.INFO)
@@ -34,6 +45,10 @@ bob_agent = None
 # Access to async runners for proper async/await pattern
 alice_runner = None
 bob_runner = None
+
+# MCP server threads (for background execution)
+alice_mcp_thread = None
+bob_mcp_thread = None
 
 # Module-level chat history (persists during session)
 alice_chat_history: List[Tuple[str, str]] = []
@@ -69,15 +84,25 @@ body {
 """
 
 
-def load_agent_references() -> None:
+def initialize_agents() -> Tuple[Any, Any]:
     """
-    Load references to Alice and Bob Companion agent modules.
+    Initialize both Alice and Bob's Companion agents with proper configuration.
     
-    Agents are initialized in their respective modules on import (with user contexts
-    and session IDs configured). This function stores module references and runner
-    instances for use by event handlers.
+    This function ensures agents are initialized with:
+    - Session IDs (alice_session, bob_session)
+    - User contexts loaded from user_context.py files
+    - Model: Gemini 2.5 Pro
+    - SessionService: DatabaseSessionService with SQLite
+    - MemoryService: InMemoryMemoryService
     
-    This function is called once during app startup (Task 2).
+    Agents are already initialized on module import, but this function verifies
+    they are ready and returns references for use by event handlers.
+    
+    Returns:
+        Tuple of (alice_agent, bob_agent) module references
+        
+    Raises:
+        Exception: If agent initialization fails
     """
     global alice_agent, bob_agent, alice_runner, bob_runner
     
@@ -96,12 +121,29 @@ def load_agent_references() -> None:
         alice_runner = alice_agent_module.runner
         bob_runner = bob_agent_module.runner
         
-        logger.info("Alice agent reference loaded (session ID: alice_session)")
-        logger.info("Bob agent reference loaded (session ID: bob_session)")
-        logger.info("Both agent references loaded successfully")
+        # Verify agents are properly configured
+        if not alice_runner or not bob_runner:
+            raise ValueError("Agent runners not initialized")
+        
+        logger.info("✅ Alice agent initialized (session ID: alice_session, model: gemini-2.5-pro)")
+        logger.info("✅ Bob agent initialized (session ID: bob_session, model: gemini-2.5-pro)")
+        logger.info("✅ Both agents initialized successfully")
+        
+        return alice_agent, bob_agent
+        
     except Exception as e:
-        logger.error(f"Failed to load agent references: {e}")
+        logger.error(f"❌ Failed to initialize agents: {e}", exc_info=True)
         raise
+
+
+def load_agent_references() -> None:
+    """
+    Load references to Alice and Bob Companion agent modules.
+    
+    This is a compatibility wrapper around initialize_agents() for backward
+    compatibility with existing code.
+    """
+    initialize_agents()
 
 
 async def _run_alice_agent_async(message: str) -> str:
@@ -662,25 +704,237 @@ def create_layout():
     return app
 
 
+def start_mcp_servers() -> None:
+    """
+    Start both Alice and Bob's MCP servers in background threads.
+    
+    Starts MCP servers on:
+    - localhost:8001 (Alice)
+    - localhost:8002 (Bob)
+    
+    Servers run in background threads so they don't block Gradio UI launch.
+    All 4 coordination tools are registered: check_availability, propose_event,
+    share_context, relay_message.
+    
+    Raises:
+        Exception: If MCP server startup fails
+    """
+    global alice_mcp_thread, bob_mcp_thread
+    import uvicorn
+    from alice_companion.http_endpoint import app as alice_app
+    from bob_companion.http_endpoint import app as bob_app
+    
+    def run_alice_server():
+        """Run Alice's MCP server in background thread."""
+        try:
+            # Create new event loop for this thread
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            
+            config = uvicorn.Config(
+                alice_app,
+                host="localhost",
+                port=8001,
+                log_level="info"
+            )
+            server = uvicorn.Server(config)
+            loop.run_until_complete(server.serve())
+        except Exception as e:
+            logger.error(f"❌ Alice MCP server failed: {e}", exc_info=True)
+    
+    def run_bob_server():
+        """Run Bob's MCP server in background thread."""
+        try:
+            # Create new event loop for this thread
+            loop = asyncio.new_event_loop()
+            asyncio.set_event_loop(loop)
+            
+            config = uvicorn.Config(
+                bob_app,
+                host="localhost",
+                port=8002,
+                log_level="info"
+            )
+            server = uvicorn.Server(config)
+            loop.run_until_complete(server.serve())
+        except Exception as e:
+            logger.error(f"❌ Bob MCP server failed: {e}", exc_info=True)
+    
+    try:
+        # Start Alice's MCP server in background thread
+        alice_mcp_thread = threading.Thread(
+            target=run_alice_server,
+            daemon=True,
+            name="AliceMCPServer"
+        )
+        alice_mcp_thread.start()
+        
+        # Start Bob's MCP server in background thread
+        bob_mcp_thread = threading.Thread(
+            target=run_bob_server,
+            daemon=True,
+            name="BobMCPServer"
+        )
+        bob_mcp_thread.start()
+        
+        # Give servers a moment to start
+        time.sleep(2)
+        
+        logger.info("✅ Alice MCP server started on localhost:8001")
+        logger.info("✅ Bob MCP server started on localhost:8002")
+        logger.info("✅ Both MCP servers started successfully")
+        
+    except Exception as e:
+        logger.error(f"❌ Failed to start MCP servers: {e}", exc_info=True)
+        raise
+
+
+def verify_a2a_endpoints() -> None:
+    """
+    Verify A2A endpoints are accessible before launching Gradio UI.
+    
+    Checks that both endpoints respond to HTTP requests:
+    - http://localhost:8001/run (Alice)
+    - http://localhost:8002/run (Bob)
+    
+    Note: These are POST-only endpoints, so we expect 405 Method Not Allowed
+    for GET requests, which confirms the server is running.
+    
+    Raises:
+        Exception: If endpoints are not accessible
+    """
+    endpoints = [
+        ("Alice", "http://localhost:8001/run"),
+        ("Bob", "http://localhost:8002/run")
+    ]
+    
+    for name, url in endpoints:
+        max_retries = 5
+        retry_delay = 0.5
+        
+        for attempt in range(max_retries):
+            try:
+                # Try a GET request to verify endpoint is accessible
+                # POST-only endpoints will return 405, which confirms server is running
+                response = httpx.get(url, timeout=2.0)
+                # Any response (including 405) means server is running
+                if response.status_code == 405:
+                    logger.info(f"✅ {name} A2A endpoint accessible at {url} (POST-only endpoint)")
+                    break
+                else:
+                    logger.info(f"✅ {name} A2A endpoint accessible at {url} (status: {response.status_code})")
+                    break
+            except httpx.ConnectError:
+                # Server not ready yet, wait and retry
+                if attempt < max_retries - 1:
+                    logger.debug(f"⏳ {name} endpoint not ready (attempt {attempt + 1}/{max_retries}), waiting...")
+                    time.sleep(retry_delay)
+                else:
+                    raise Exception(f"❌ {name} A2A endpoint not accessible at {url} after {max_retries} attempts")
+            except Exception as e:
+                # For POST-only endpoints, 405 is expected
+                if "405" in str(e) or "Method Not Allowed" in str(e) or hasattr(e, 'response') and e.response.status_code == 405:
+                    logger.info(f"✅ {name} A2A endpoint accessible at {url} (POST-only endpoint)")
+                    break
+                else:
+                    if attempt < max_retries - 1:
+                        logger.debug(f"⏳ {name} endpoint error (attempt {attempt + 1}/{max_retries}): {e}, retrying...")
+                        time.sleep(retry_delay)
+                    else:
+                        raise Exception(f"❌ {name} A2A endpoint verification failed: {e}")
+
+
+def startup_sequence() -> None:
+    """
+    Orchestrate complete startup sequence for Companion Network demo.
+    
+    Executes initialization steps in correct order:
+    1. Load environment variables (.env file)
+    2. Initialize Alice agent (with user context, session ID)
+    3. Initialize Bob agent (with user context, session ID)
+    4. Start Alice MCP server (localhost:8001)
+    5. Start Bob MCP server (localhost:8002)
+    6. Verify A2A endpoints are accessible
+    7. Log completion status
+    
+    Raises:
+        Exception: If any initialization step fails
+    """
+    logger.info("=" * 60)
+    logger.info("🚀 Starting Companion Network Demo")
+    logger.info("=" * 60)
+    
+    try:
+        # Step 1: Environment variables are loaded via dotenv at module import
+        
+        # Step 2 & 3: Initialize agents
+        logger.info("📋 Step 1/6: Initializing agents...")
+        initialize_agents()
+        
+        # Step 4 & 5: Start MCP servers
+        logger.info("📋 Step 2/6: Starting MCP servers...")
+        start_mcp_servers()
+        
+        # Step 6: Verify A2A endpoints
+        logger.info("📋 Step 3/6: Verifying A2A endpoints...")
+        verify_a2a_endpoints()
+        
+        logger.info("=" * 60)
+        logger.info("✅ Startup sequence completed successfully!")
+        logger.info("=" * 60)
+        logger.info("📊 Components ready:")
+        logger.info("   - Alice agent: initialized (session: alice_session)")
+        logger.info("   - Bob agent: initialized (session: bob_session)")
+        logger.info("   - Alice MCP server: running on localhost:8001")
+        logger.info("   - Bob MCP server: running on localhost:8002")
+        logger.info("   - A2A endpoints: verified accessible")
+        logger.info("=" * 60)
+        
+    except Exception as e:
+        logger.error("=" * 60)
+        logger.error(f"❌ Startup sequence failed: {e}")
+        logger.error("=" * 60)
+        logger.error("Please check the error above and ensure:")
+        logger.error("  - .env file exists with GOOGLE_API_KEY")
+        logger.error("  - Ports 8001 and 8002 are not in use")
+        logger.error("  - All dependencies are installed")
+        logger.error("=" * 60)
+        raise
+
+
 def main():
     """
     Main entry point for the Gradio application.
     
-    Initializes agents, creates layout, and launches the Companion Network
-    demo interface on localhost:7860.
+    Executes startup sequence (agent initialization, MCP server startup, A2A endpoint
+    verification), creates layout, and launches the Companion Network demo interface
+    on localhost:7860.
     """
-    # Load agent references before creating layout
-    load_agent_references()
-    
-    # Create Gradio layout
-    app = create_layout()
-    
-    # Launch Gradio app
-    app.launch(
-        server_name="localhost",
-        server_port=7860,
-        share=False
-    )
+    try:
+        # Execute startup sequence
+        startup_sequence()
+        
+        # Create Gradio layout
+        logger.info("📋 Step 4/6: Creating Gradio layout...")
+        app = create_layout()
+        
+        # Launch Gradio app
+        logger.info("📋 Step 5/6: Launching Gradio UI on localhost:7860...")
+        logger.info("=" * 60)
+        logger.info("🌐 Companion Network Demo is ready!")
+        logger.info("   Open your browser to: http://localhost:7860")
+        logger.info("=" * 60)
+        
+        app.launch(
+            server_name="localhost",
+            server_port=7860,
+            share=False
+        )
+        
+    except Exception as e:
+        logger.error(f"❌ Failed to start application: {e}", exc_info=True)
+        logger.error("Application startup aborted. Please fix errors and try again.")
+        raise
 
 
 if __name__ == "__main__":
