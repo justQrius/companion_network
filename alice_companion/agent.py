@@ -15,6 +15,7 @@ from alice_companion.sqlite_session_service import SqliteSessionService
 from google.adk.memory import InMemoryMemoryService
 from alice_companion.user_context import get_alice_context
 from alice_companion.mcp_client import MCPClient
+from shared.availability import check_availability
 
 # Configuration constants
 AGENT_NAME = "alices_companion"  # Valid identifier (spaces/special chars not allowed)
@@ -25,6 +26,7 @@ DATABASE_PATH = Path(__file__).parent.parent / "companion_sessions.db"
 
 # System instruction emphasizing coordination, privacy, and natural conversation
 # Enhanced with natural language coordination request parsing (Story 2.5)
+# Enhanced with availability checking capability (Story 2.7)
 SYSTEM_INSTRUCTION = """You are Alice's personal Companion agent. You coordinate plans on Alice's behalf, 
 maintaining her privacy while facilitating natural conversations with other companions. 
 You help schedule events, share availability, and propose activities while respecting 
@@ -49,11 +51,16 @@ When Alice makes a coordination request, you should:
    Access this via session.state["user_context"]["trusted_contacts"]. Only proceed with coordination
    if the person is trusted.
 
-4. **Acknowledge Naturally**: Respond with natural language acknowledgment that shows understanding:
-   - Example: "I'll coordinate with Bob's Companion to find a time for dinner this weekend..."
+4. **Check Availability**: After parsing the coordination request, check Alice's availability for the requested timeframe.
+   Use the check_availability() helper function to retrieve Alice's schedule from session state and identify
+   free time slots that align with her dining preferences. This helps you know when Alice is available before
+   coordinating with other companions.
+
+5. **Acknowledge Naturally**: Respond with natural language acknowledgment that shows understanding:
+   - Example: "I'll check your availability for this weekend and coordinate with Bob's Companion to find a time for dinner..."
    - Use conversational tone, not JSON or structured formats
 
-5. **Identify Contact Need**: Determine which Companion agent you need to contact for coordination
+6. **Identify Contact Need**: Determine which Companion agent you need to contact for coordination
    (e.g., if Alice mentions "Bob", you'll need to contact Bob's Companion).
 
 Remember: Use natural language understanding - Alice doesn't need to use specific commands or syntax.
@@ -223,6 +230,52 @@ async def call_bob_tool(tool_name: str, **params) -> dict:
     """
     client = get_mcp_client()
     return await client.call_tool(tool_name, **params)
+
+
+async def check_alice_availability(timeframe: str, duration_hours: int = 2) -> list[str]:
+    """Check Alice's availability for a given timeframe.
+    
+    This helper function retrieves Alice's user context from session state and
+    uses the shared availability checking logic to identify free time slots.
+    
+    Integration Pattern:
+    1. Agent parses coordination request and extracts timeframe (from Story 2.5)
+    2. Agent calls this helper to check Alice's availability
+    3. Function retrieves user_context from session state
+    4. Function calls shared check_availability() with Alice's context
+    5. Returns list of ISO 8601 time range strings for available slots
+    
+    Args:
+        timeframe: Natural language timeframe (e.g., "this weekend") or ISO 8601 range
+        duration_hours: Duration of event in hours (default: 2 for dinner)
+        
+    Returns:
+        List of ISO 8601 time range strings (e.g., ["2024-12-07T19:00:00/2024-12-07T21:00:00"])
+        Returns empty list if all times are busy
+        
+    Raises:
+        ValueError: If session state is not accessible or user_context is missing
+    """
+    # Get current session to access user_context
+    session = await session_service.get_session(
+        app_name="companion_network",
+        user_id="alice",
+        session_id=SESSION_ID
+    )
+    
+    if not session or "user_context" not in session.state:
+        raise ValueError("Alice's user context not found in session state")
+    
+    user_context = session.state["user_context"]
+    
+    # Use shared availability checking function
+    return check_availability(
+        user_context=user_context,
+        timeframe=timeframe,
+        duration_hours=duration_hours,
+        max_slots=5,
+        min_slots=3
+    )
 
 
 # For AC3: "agent.run() method is available" - use run() function
