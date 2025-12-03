@@ -12,8 +12,10 @@ This module serves as the Gradio Orchestrator, providing:
 """
 
 import gradio as gr
-from typing import List, Tuple
+from typing import List, Tuple, Dict, Any
 import logging
+import json
+from datetime import datetime
 
 # Import agent modules
 from alice_companion import agent as alice_agent_module
@@ -362,6 +364,192 @@ async def handle_bob_input(message: str, history: List[Tuple[str, str]]) -> Tupl
     return history, ""
 
 
+async def update_network_monitor() -> Dict[str, Any]:
+    """
+    Update the Network Activity Monitor with A2A events from both agents.
+    
+    Reads A2A events from both Alice's and Bob's session states, merges them
+    chronologically, and formats them for display in the Gradio JSON component.
+    
+    Integration Pattern (Story 4.3):
+    - Reads from `app:a2a_events` list in both Alice's and Bob's session states
+    - Events are logged by Story 2.8's A2A communication layer
+    - Formats events chronologically (oldest to newest)
+    - Returns formatted JSON for Gradio display
+    
+    Returns:
+        Dictionary containing formatted events for JSON display, or empty state message.
+        Format: {"events": [...], "count": N, "last_updated": "timestamp"}
+    """
+    try:
+        # Get both sessions to read A2A events
+        alice_session = await alice_runner.session_service.get_session(
+            app_name="companion_network",
+            user_id="alice",
+            session_id="alice_session"
+        )
+        
+        bob_session = await bob_runner.session_service.get_session(
+            app_name="companion_network",
+            user_id="bob",
+            session_id="bob_session"
+        )
+        
+        # Collect events from both sessions
+        all_events = []
+        
+        if alice_session and "app:a2a_events" in alice_session.state:
+            alice_events = alice_session.state.get("app:a2a_events", [])
+            all_events.extend(alice_events)
+        
+        if bob_session and "app:a2a_events" in bob_session.state:
+            bob_events = bob_session.state.get("app:a2a_events", [])
+            all_events.extend(bob_events)
+        
+        # Handle empty events list
+        if not all_events:
+            return {
+                "message": "No A2A events yet",
+                "events": [],
+                "count": 0,
+                "last_updated": datetime.now().isoformat()
+            }
+        
+        # Sort events chronologically (oldest to newest) by timestamp
+        sorted_events = sorted(
+            all_events,
+            key=lambda e: e.get("timestamp", ""),
+            reverse=False  # Oldest first
+        )
+        
+        # Format events for display (ensure all required fields are present)
+        # Format sender/receiver names to match story requirements: "Alice's Companion", "Bob's Companion"
+        def format_agent_name(name: str) -> str:
+            """Format agent identifier to display name."""
+            if name.lower() == "alice":
+                return "Alice's Companion"
+            elif name.lower() == "bob":
+                return "Bob's Companion"
+            else:
+                return name  # Fallback for unknown names
+        
+        def format_timestamp(iso_timestamp: str) -> str:
+            """Format ISO 8601 timestamp to human-readable format."""
+            try:
+                # Handle ISO format with or without timezone
+                timestamp_str = iso_timestamp.replace('Z', '+00:00') if 'Z' in iso_timestamp else iso_timestamp
+                dt = datetime.fromisoformat(timestamp_str)
+                # Remove timezone info for formatting if present
+                if dt.tzinfo is not None:
+                    dt = dt.replace(tzinfo=None)
+                return dt.strftime("%Y-%m-%d %H:%M:%S")
+            except (ValueError, AttributeError, TypeError):
+                return iso_timestamp  # Return original if parsing fails
+        
+        def format_status(status: str) -> Dict[str, Any]:
+            """Format status with visual distinction indicators."""
+            status_lower = status.lower() if status else "unknown"
+            if status_lower == "success":
+                return {
+                    "status": "success",
+                    "icon": "✅",
+                    "color": "green"
+                }
+            elif status_lower == "failed":
+                return {
+                    "status": "failed",
+                    "icon": "❌",
+                    "color": "red"
+                }
+            else:
+                return {
+                    "status": status,
+                    "icon": "⚠️",
+                    "color": "orange"
+                }
+        
+        formatted_events = []
+        for event in sorted_events:
+            # Validate event structure (handle malformed events gracefully)
+            if not isinstance(event, dict):
+                logger.warning(f"Skipping malformed event (not a dict): {event}")
+                continue
+            
+            sender = event.get("sender", "unknown")
+            receiver = event.get("receiver", "unknown")
+            timestamp = event.get("timestamp", "")
+            tool = event.get("tool", "unknown")
+            params = event.get("params", {})
+            status = event.get("status", "unknown")
+            
+            # Validate required fields
+            if not timestamp or not tool:
+                logger.warning(f"Skipping event with missing required fields: {event}")
+                continue
+            
+            formatted_event = {
+                "timestamp": format_timestamp(timestamp),
+                "timestamp_iso": timestamp,  # Keep ISO format for sorting
+                "sender": format_agent_name(sender),
+                "receiver": format_agent_name(receiver),
+                "tool": tool,
+                "params": params if isinstance(params, dict) else {},
+                "status_info": format_status(status)
+            }
+            formatted_events.append(formatted_event)
+        
+        # Handle very long event lists: limit to most recent 100 events for performance
+        # JSON component will handle scrolling automatically
+        max_events = 100
+        if len(formatted_events) > max_events:
+            formatted_events = formatted_events[-max_events:]  # Keep most recent events
+            logger.info(f"Network monitor: Limited display to {max_events} most recent events (total: {len(sorted_events)})")
+        
+        # Visual activity indicator: Check if there are recent events (within last 2 seconds)
+        # This provides visual feedback that A2A communication is active
+        now = datetime.now()
+        recent_events = []
+        for event in sorted_events:
+            try:
+                timestamp_str = event.get("timestamp", "")
+                if not timestamp_str:
+                    continue
+                # Handle ISO format with or without timezone
+                timestamp_str = timestamp_str.replace('Z', '+00:00') if 'Z' in timestamp_str else timestamp_str
+                event_time = datetime.fromisoformat(timestamp_str)
+                # Remove timezone info for comparison
+                if event_time.tzinfo is not None:
+                    event_time = event_time.replace(tzinfo=None)
+                time_diff = (now - event_time).total_seconds()
+                if 0 <= time_diff <= 2.0:  # Events within last 2 seconds
+                    recent_events.append(event)
+            except (ValueError, AttributeError, TypeError):
+                continue
+        
+        activity_status = "🟢 Active" if recent_events else "⚪ Idle"
+        
+        # Return formatted data for JSON component
+        return {
+            "events": formatted_events,
+            "count": len(formatted_events),
+            "total_count": len(sorted_events),  # Total events (may be more than displayed)
+            "last_updated": datetime.now().isoformat(),
+            "activity_status": activity_status,
+            "recent_activity": len(recent_events) > 0,
+            "message": f"Showing {len(formatted_events)} of {len(sorted_events)} events" if len(formatted_events) < len(sorted_events) else f"{len(formatted_events)} events"
+        }
+        
+    except Exception as e:
+        logger.error(f"Error updating network monitor: {e}", exc_info=True)
+        return {
+            "error": "Failed to load network events",
+            "details": str(e),
+            "events": [],
+            "count": 0,
+            "last_updated": datetime.now().isoformat()
+        }
+
+
 def create_layout():
     """
     Create the split-screen Gradio layout structure.
@@ -459,15 +647,17 @@ def create_layout():
         with gr.Row():
             with gr.Column(min_width=1200):
                 gr.Markdown("### 🔗 Network Activity Monitor", elem_classes=["panel-label"])
-                network_monitor = gr.Textbox(
+                network_monitor = gr.JSON(
                     label="A2A Communication Log",
-                    value="A2A events will appear here",
-                    lines=6,
-                    interactive=False,
+                    value={"message": "No A2A events yet", "events": [], "count": 0},
                     show_label=False
                 )
-                # Placeholder for network monitor updates (to be implemented in Story 4.3)
-                # app.load(update_network_monitor, outputs=network_monitor, every=1)
+                # Real-time updates: poll every 500ms (per NFR: updates within 500ms of A2A call completion)
+                app.load(
+                    fn=update_network_monitor,
+                    outputs=network_monitor,
+                    every=0.5  # 500ms polling interval
+                )
     
     return app
 
