@@ -389,3 +389,165 @@ async def propose_event(
             "event_id": event_id
         }
 
+
+async def share_context(
+    category: str,
+    purpose: str,
+    requester: str
+) -> Dict[str, Any]:
+    """Share specific approved context with a trusted contact.
+    
+    This tool allows trusted contacts to request specific context categories
+    (preferences, dietary, schedule, interests) based on sharing rules.
+    It enforces strict privacy protection by only returning data explicitly
+    allowed in sharing_rules (data minimization principle).
+    
+    Args:
+        category: Context category to share (enum: "preferences", "dietary", "schedule", "interests")
+        purpose: Description of what the context will be used for (logged for audit trail)
+        requester: User ID of the person requesting context (must be in trusted_contacts)
+        
+    Returns:
+        Dictionary with keys:
+        - context_data (dict): Requested context data if category is allowed in sharing_rules
+        - access_denied (str): Reason message if category is not permitted (mutually exclusive with context_data)
+        
+        If requester is not trusted, returns error dict:
+        - error (str): "Access denied"
+        - message (str): "Requester not in trusted contacts"
+        
+        If invalid input, returns error dict:
+        - error (str): "Invalid input"
+        - message (str): Description of validation error
+        
+    Raises:
+        No exceptions raised - all errors return error dictionaries per graceful degradation pattern.
+        
+    Privacy Protection:
+        - Only returns data for categories explicitly allowed in sharing_rules[requester]
+        - Never exposes data not explicitly permitted (data minimization principle)
+        - Logs purpose parameter for contextual integrity (not enforced in MVP)
+    """
+    # AC1: Input validation
+    if not category or not isinstance(category, str) or not category.strip():
+        return {
+            "error": "Invalid input",
+            "message": "category must be a non-empty string"
+        }
+    
+    if not purpose or not isinstance(purpose, str) or not purpose.strip():
+        return {
+            "error": "Invalid input",
+            "message": "purpose must be a non-empty string"
+        }
+    
+    if not requester or not isinstance(requester, str) or not requester.strip():
+        return {
+            "error": "Invalid input",
+            "message": "requester must be a non-empty string"
+        }
+    
+    # AC6: Category enum validation
+    valid_categories = ["preferences", "dietary", "schedule", "interests"]
+    if category not in valid_categories:
+        return {
+            "error": "Invalid input",
+            "message": f"category must be one of: {', '.join(valid_categories)}"
+        }
+    
+    # AC2: Trusted Contact Validation
+    # AC4: Retrieve user context from session state
+    session = await SESSION_SERVICE.get_session(
+        app_name=APP_NAME,
+        user_id=USER_ID,
+        session_id=SESSION_ID
+    )
+    
+    if not session:
+        return {
+            "error": "Session not found",
+            "message": f"Session not found for user_id={USER_ID}, session_id={SESSION_ID}. Session may not have been initialized."
+        }
+    
+    if "user_context" not in session.state:
+        return {
+            "error": "User context missing",
+            "message": f"Session exists but 'user_context' key is missing from session state for user_id={USER_ID}. User context may not have been loaded."
+        }
+    
+    user_context_dict = session.state["user_context"]
+    trusted_contacts = user_context_dict.get("trusted_contacts", [])
+    
+    # AC2: Validate requester is in trusted_contacts
+    if requester not in trusted_contacts:
+        return {
+            "error": "Access denied",
+            "message": "Requester not in trusted contacts"
+        }
+    
+    # AC8: Purpose logging (contextual integrity - logged but not enforced in MVP)
+    logger.info(f"share_context called: category={category}, purpose={purpose}, requester={requester}")
+    
+    # AC3: Sharing Rules Validation
+    sharing_rules = user_context_dict.get("sharing_rules", {})
+    
+    # AC7: Privacy Protection - Check if requester has sharing rules
+    if requester not in sharing_rules:
+        return {
+            "access_denied": "No sharing rules defined for requester"
+        }
+    
+    allowed_categories = sharing_rules.get(requester, [])
+    
+    # AC3, AC7: Privacy Protection - Check if category is allowed
+    if not allowed_categories or category not in allowed_categories:
+        return {
+            "access_denied": "Category not permitted in sharing rules"
+        }
+    
+    # AC4: Extract context data based on category
+    context_data = {}
+    
+    if category == "preferences":
+        # Extract preferences: cuisine, dining_times, weekend_availability
+        user_preferences = user_context_dict.get("preferences", {})
+        if "cuisine" in user_preferences:
+            context_data["cuisine"] = user_preferences["cuisine"]
+        if "dining_times" in user_preferences:
+            context_data["dining_times"] = user_preferences["dining_times"]
+        if "weekend_availability" in user_preferences:
+            context_data["weekend_availability"] = user_preferences["weekend_availability"]
+    
+    elif category == "dietary":
+        # Extract dietary restrictions/allergies if available
+        # May be empty dict if not configured (AC4.6: handle missing data gracefully)
+        user_preferences = user_context_dict.get("preferences", {})
+        if "dietary_restrictions" in user_preferences:
+            context_data["dietary_restrictions"] = user_preferences["dietary_restrictions"]
+        if "allergies" in user_preferences:
+            context_data["allergies"] = user_preferences["allergies"]
+        # Return empty dict if not available (not an error)
+    
+    elif category == "schedule":
+        # Extract schedule patterns (not full schedule, just patterns like "prefers evenings")
+        # AC4.4: Return schedule patterns, not full schedule
+        user_preferences = user_context_dict.get("preferences", {})
+        if "schedule_patterns" in user_preferences:
+            context_data["schedule_patterns"] = user_preferences["schedule_patterns"]
+        # Return empty dict if not available (not an error)
+    
+    elif category == "interests":
+        # Extract interests/hobbies if available
+        # May be empty dict if not configured (AC4.6: handle missing data gracefully)
+        user_preferences = user_context_dict.get("preferences", {})
+        if "interests" in user_preferences:
+            context_data["interests"] = user_preferences["interests"]
+        if "hobbies" in user_preferences:
+            context_data["hobbies"] = user_preferences["hobbies"]
+        # Return empty dict if not available (not an error)
+    
+    # AC9: Return value structure - mutually exclusive context_data or access_denied
+    # Since we've already validated category is allowed, return context_data
+    return {
+        "context_data": context_data
+    }

@@ -18,7 +18,7 @@ from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import JSONResponse
 import uvicorn
 
-from bob_companion.mcp_server import check_availability, propose_event
+from bob_companion.mcp_server import check_availability, propose_event, share_context
 
 logger = logging.getLogger(__name__)
 
@@ -90,6 +90,12 @@ async def handle_jsonrpc(request: Request) -> JSONResponse:
                     datetime=tool_args.get("datetime"),
                     location=tool_args.get("location"),
                     participants=tool_args.get("participants"),
+                    requester=tool_args.get("requester")
+                )
+            elif tool_name == "share_context":
+                result = await share_context(
+                    category=tool_args.get("category"),
+                    purpose=tool_args.get("purpose"),
                     requester=tool_args.get("requester")
                 )
             else:
