@@ -16,6 +16,7 @@ from google.adk.memory import InMemoryMemoryService
 from alice_companion.user_context import get_alice_context
 from alice_companion.mcp_client import MCPClient
 from shared.availability import check_availability
+from shared.a2a_logging import log_a2a_event
 
 # Configuration constants
 AGENT_NAME = "alices_companion"  # Valid identifier (spaces/special chars not allowed)
@@ -27,6 +28,7 @@ DATABASE_PATH = Path(__file__).parent.parent / "companion_sessions.db"
 # System instruction emphasizing coordination, privacy, and natural conversation
 # Enhanced with natural language coordination request parsing (Story 2.5)
 # Enhanced with availability checking capability (Story 2.7)
+# Enhanced with A2A communication capability (Story 2.8)
 SYSTEM_INSTRUCTION = """You are Alice's personal Companion agent. You coordinate plans on Alice's behalf, 
 maintaining her privacy while facilitating natural conversations with other companions. 
 You help schedule events, share availability, and propose activities while respecting 
@@ -56,15 +58,25 @@ When Alice makes a coordination request, you should:
    free time slots that align with her dining preferences. This helps you know when Alice is available before
    coordinating with other companions.
 
-5. **Acknowledge Naturally**: Respond with natural language acknowledgment that shows understanding:
+5. **A2A Communication**: When you need to coordinate with another Companion agent (e.g., Bob's Companion),
+   use the call_other_companion_tool() helper function to call tools on their MCP server. This function:
+   - Handles JSON-RPC 2.0 protocol communication automatically
+   - Includes retry logic for reliability
+   - Returns error dictionaries instead of raising exceptions (always provides feedback)
+   - Logs all communication events for network monitoring
+   - Example: result = await call_other_companion_tool("check_availability", timeframe="this weekend", requester="alice")
+   - Always check for "error" key in result before processing: if "error" in result, inform Alice gracefully
+
+6. **Acknowledge Naturally**: Respond with natural language acknowledgment that shows understanding:
    - Example: "I'll check your availability for this weekend and coordinate with Bob's Companion to find a time for dinner..."
    - Use conversational tone, not JSON or structured formats
 
-6. **Identify Contact Need**: Determine which Companion agent you need to contact for coordination
+7. **Identify Contact Need**: Determine which Companion agent you need to contact for coordination
    (e.g., if Alice mentions "Bob", you'll need to contact Bob's Companion).
 
 Remember: Use natural language understanding - Alice doesn't need to use specific commands or syntax.
-You interpret her intent from conversational messages."""
+You interpret her intent from conversational messages. Always handle coordination errors gracefully and provide
+clear feedback to Alice if coordination fails."""
 
 # Initialize session service with SQLite persistence
 session_service = SqliteSessionService(db_path=str(DATABASE_PATH))
@@ -203,33 +215,190 @@ def get_mcp_client() -> MCPClient:
     return _mcp_client
 
 
-async def call_bob_tool(tool_name: str, **params) -> dict:
-    """Helper method to call a tool on Bob's Companion MCP server.
+async def call_other_companion_tool(tool_name: str, **params) -> dict:
+    """Call a tool on another Companion's MCP server with error handling and logging.
     
-    This is the primary interface for Alice's agent to interact with Bob's Companion.
-    The agent can use this when it identifies coordination intent (from Story 2.5)
-    and needs to call tools on Bob's MCP server.
+    This function implements A2A (Agent-to-Agent) communication following the architecture
+    error handling pattern. It calls tools on Bob's Companion MCP server using JSON-RPC 2.0
+    protocol, handles errors gracefully, and logs events for the network activity monitor.
     
-    Integration Pattern:
+    Integration Pattern (Story 2.8):
     1. Agent identifies coordination need (e.g., "Find time with Bob")
     2. Agent verifies Bob is in trusted_contacts (from Story 2.5)
-    3. Agent calls this helper: call_bob_tool("check_availability", timeframe="...")
-    4. MCP client handles HTTP/JSON-RPC 2.0 communication
-    5. Result is returned to agent for processing
+    3. Agent calls this function: call_other_companion_tool("check_availability", timeframe="...")
+    4. MCP client handles HTTP/JSON-RPC 2.0 communication with retry logic
+    5. Event is logged to session state for Gradio visualization
+    6. Result (or error dict) is returned to agent for processing
+    
+    Error Handling (AC: 6, 7):
+    - Retry logic: MCP client retries once on failure (handled by MCPClient)
+    - Graceful degradation: Returns error dict instead of raising exceptions
+    - User-friendly messages: Error dicts contain clear messages for Alice
+    
+    A2A Event Logging (AC: 4, 8):
+    - All calls (successful and failed) are logged to session state
+    - Events include timestamp, sender, receiver, tool, params (redacted), status
+    - Logged to `app:a2a_events` list in Alice's session state
     
     Args:
         tool_name: Name of the tool to call on Bob's MCP server
         **params: Tool parameters as keyword arguments
         
     Returns:
-        Dictionary containing tool execution result
+        Dictionary containing tool execution result on success, or error dict on failure.
+        Error dict format: {"error": "user-friendly message", "details": "technical details"}
         
-    Raises:
-        ConnectionError: If Bob's Companion is unreachable
-        ValueError: If tool call fails
+    Example:
+        result = await call_other_companion_tool(
+            "check_availability",
+            timeframe="this weekend",
+            requester="alice"
+        )
+        if "error" in result:
+            # Handle error gracefully
+            print(f"Coordination failed: {result['error']}")
+        else:
+            # Process successful result
+            slots = result.get("slots", [])
     """
+    # Get current session for logging
+    session = await session_service.get_session(
+        app_name="companion_network",
+        user_id="alice",
+        session_id=SESSION_ID
+    )
+    
+    if not session:
+        # If session not available, still try the call but skip logging
+        error_result = {
+            "error": "Session not available for logging",
+            "details": "Cannot log A2A event without session"
+        }
+        return error_result
+    
+    # Get MCP client and attempt tool call
     client = get_mcp_client()
-    return await client.call_tool(tool_name, **params)
+    
+    try:
+        # Call tool on Bob's MCP server (includes retry logic per architecture pattern)
+        result = await client.call_tool(tool_name, **params)
+        
+        # Log successful A2A event
+        log_a2a_event(
+            session_state=session.state,
+            sender="alice",
+            receiver="bob",
+            tool=tool_name,
+            params=params,
+            result=result
+        )
+        
+        # Update session state to persist the event log
+        await session_service.update_session_state(
+            app_name="companion_network",
+            user_id="alice",
+            session_id=SESSION_ID,
+            state=session.state
+        )
+        
+        return result
+        
+    except ConnectionError as e:
+        # Connection error after retry - return graceful error message
+        error_result = {
+            "error": "Agent temporarily unavailable: Cannot connect to Bob's Companion. Please ensure Bob's Companion is running.",
+            "details": str(e)
+        }
+        
+        # Log failed A2A event
+        log_a2a_event(
+            session_state=session.state,
+            sender="alice",
+            receiver="bob",
+            tool=tool_name,
+            params=params,
+            result=error_result
+        )
+        
+        # Update session state
+        await session_service.update_session_state(
+            app_name="companion_network",
+            user_id="alice",
+            session_id=SESSION_ID,
+            state=session.state
+        )
+        
+        return error_result
+        
+    except ValueError as e:
+        # Tool call error (invalid parameters, tool not found, etc.)
+        error_result = {
+            "error": f"Coordination request failed: {str(e)}",
+            "details": str(e)
+        }
+        
+        # Log failed A2A event
+        log_a2a_event(
+            session_state=session.state,
+            sender="alice",
+            receiver="bob",
+            tool=tool_name,
+            params=params,
+            result=error_result
+        )
+        
+        # Update session state
+        await session_service.update_session_state(
+            app_name="companion_network",
+            user_id="alice",
+            session_id=SESSION_ID,
+            state=session.state
+        )
+        
+        return error_result
+        
+    except Exception as e:
+        # Unexpected error - still return graceful message (demo must never crash)
+        error_result = {
+            "error": "An unexpected error occurred during coordination. Please try again.",
+            "details": str(e)
+        }
+        
+        # Log failed A2A event
+        log_a2a_event(
+            session_state=session.state,
+            sender="alice",
+            receiver="bob",
+            tool=tool_name,
+            params=params,
+            result=error_result
+        )
+        
+        # Update session state
+        await session_service.update_session_state(
+            app_name="companion_network",
+            user_id="alice",
+            session_id=SESSION_ID,
+            state=session.state
+        )
+        
+        return error_result
+
+
+async def call_bob_tool(tool_name: str, **params) -> dict:
+    """Helper method to call a tool on Bob's Companion MCP server.
+    
+    This is a convenience wrapper around call_other_companion_tool() for backward
+    compatibility. New code should use call_other_companion_tool() directly.
+    
+    Args:
+        tool_name: Name of the tool to call on Bob's MCP server
+        **params: Tool parameters as keyword arguments
+        
+    Returns:
+        Dictionary containing tool execution result or error dict
+    """
+    return await call_other_companion_tool(tool_name, **params)
 
 
 async def check_alice_availability(timeframe: str, duration_hours: int = 2) -> list[str]:
