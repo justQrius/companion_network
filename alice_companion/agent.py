@@ -14,6 +14,7 @@ from google.adk import Agent, Runner
 from alice_companion.sqlite_session_service import SqliteSessionService
 from google.adk.memory import InMemoryMemoryService
 from alice_companion.user_context import get_alice_context
+from alice_companion.mcp_client import MCPClient
 
 # Configuration constants
 AGENT_NAME = "alices_companion"  # Valid identifier (spaces/special chars not allowed)
@@ -169,6 +170,60 @@ def run(message: str) -> str:
         return "".join(response_parts)
     
     return asyncio.run(_run_async())
+
+# MCP Client integration for calling tools on Bob's Companion
+# The MCP client is initialized on-demand when coordination is needed
+_mcp_client: MCPClient | None = None
+
+
+def get_mcp_client() -> MCPClient:
+    """Get or create MCP client for calling tools on Bob's Companion.
+    
+    Returns a singleton MCP client instance that connects to Bob's Companion
+    endpoint (http://localhost:8002/run) per ADR-003.
+    
+    Integration Pattern:
+    - MCP client is created on-demand (lazy initialization)
+    - Client handles connection establishment and error handling
+    - Use call_bob_tool() helper for easier tool calling
+    
+    Returns:
+        MCPClient instance configured for Bob's endpoint
+    """
+    global _mcp_client
+    if _mcp_client is None:
+        _mcp_client = MCPClient()
+    return _mcp_client
+
+
+async def call_bob_tool(tool_name: str, **params) -> dict:
+    """Helper method to call a tool on Bob's Companion MCP server.
+    
+    This is the primary interface for Alice's agent to interact with Bob's Companion.
+    The agent can use this when it identifies coordination intent (from Story 2.5)
+    and needs to call tools on Bob's MCP server.
+    
+    Integration Pattern:
+    1. Agent identifies coordination need (e.g., "Find time with Bob")
+    2. Agent verifies Bob is in trusted_contacts (from Story 2.5)
+    3. Agent calls this helper: call_bob_tool("check_availability", timeframe="...")
+    4. MCP client handles HTTP/JSON-RPC 2.0 communication
+    5. Result is returned to agent for processing
+    
+    Args:
+        tool_name: Name of the tool to call on Bob's MCP server
+        **params: Tool parameters as keyword arguments
+        
+    Returns:
+        Dictionary containing tool execution result
+        
+    Raises:
+        ConnectionError: If Bob's Companion is unreachable
+        ValueError: If tool call fails
+    """
+    client = get_mcp_client()
+    return await client.call_tool(tool_name, **params)
+
 
 # For AC3: "agent.run() method is available" - use run() function
 # Note: Agent is a Pydantic model, so we use a module-level function

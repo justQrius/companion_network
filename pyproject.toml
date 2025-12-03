@@ -8,4 +8,5 @@ dependencies = [
     "mcp[cli]>=1.22.0",
     "gradio",
     "python-dotenv",
+    "httpx>=0.25.0",
 ]
