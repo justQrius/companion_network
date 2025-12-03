@@ -61,3 +61,6 @@ coverage.xml
 *.sqlite
 *.sqlite3
 
+# Documentation (local only, not pushed to remote)
+docs/
+
