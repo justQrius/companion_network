@@ -603,11 +603,10 @@ def create_layout():
     Returns:
         gr.Blocks: Configured Gradio Blocks interface
     """
-    with gr.Blocks(
-        theme=gr.themes.Base(),  # Gradio Base theme
-        css=CUSTOM_CSS,
-        title="Companion Network - A2A Coordination Demo"
-    ) as app:
+    with gr.Blocks() as app:
+        # Inject custom CSS using gr.HTML (works in all Gradio versions)
+        gr.HTML(f"<style>{CUSTOM_CSS}</style>", visible=False)
+        
         # App title
         gr.Markdown("# 🤝 Companion Network - A2A Coordination Demo")
         gr.Markdown("*Watch Alice and Bob's Companions coordinate autonomously*")
@@ -925,6 +924,8 @@ def main():
         logger.info("   Open your browser to: http://localhost:7860")
         logger.info("=" * 60)
         
+        # Note: title parameter may not be supported in older Gradio versions
+        # CSS is injected via gr.HTML() in create_layout() instead of css parameter
         app.launch(
             server_name="localhost",
             server_port=7860,

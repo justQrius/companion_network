@@ -135,12 +135,53 @@ When you run `python app.py`, the application starts a Gradio web server that di
 - **Right Panel:** Bob's Companion - Chat interface where you can interact with Bob's AI Companion  
 - **Network Monitor:** Real-time log showing all A2A (Agent-to-Agent) communication between the Companions
 
-**Try this scenario:**
-1. In Alice's chat, type: *"Find a time for dinner with Bob this weekend"*
-2. Watch the Network Activity Monitor as Alice's Companion contacts Bob's Companion
-3. See the Companions negotiate availability and preferences
-4. Receive a coordinated proposal: *"Saturday 7pm works for both of you, Bob prefers Italian"*
-5. Confirm the event and see it reflected in both Companions' contexts
+### Complete Demo Flow
+
+**Step 1: Initial Request**
+1. In Alice's chat interface (left panel), type: *"Find a time for dinner with Bob this weekend"*
+2. Press Enter or click Send
+3. **Expected:** Message appears immediately in Alice's chat
+4. **Expected:** "thinking..." indicator appears while Alice's Companion processes
+
+**Step 2: A2A Coordination (5-10 seconds)**
+1. Watch the Network Activity Monitor (bottom panel) as A2A events appear in real-time
+2. **Expected:** Events show `check_availability` calls between Alice and Bob
+3. **Expected:** Events show `propose_event` calls
+4. **Expected:** Each event includes timestamp, sender, receiver, tool name, and status
+
+**Step 3: View Coordination Results**
+1. **Alice's View:** Alice's Companion responds with coordination messages showing the negotiation process
+2. **Bob's View:** Bob sees incoming event proposal in his chat interface
+3. **Network Monitor:** All A2A calls displayed with correct details
+
+**Step 4: Confirm Event**
+1. In Alice's chat, type: *"Sounds good, confirm it"*
+2. Press Enter or click Send
+3. **Expected:** Event is confirmed in both Companions' session states
+4. **Expected:** Event status is consistent across both agents
+
+### Performance Targets
+
+- **Complete Flow:** Should complete within 10 seconds (from initial request to confirmation)
+- **A2A Latency:** Companion-to-Companion communication should complete within 3-5 seconds
+- **UI Responsiveness:** Chat interface should feel "instant" (sub-100ms response time)
+
+### What to Observe
+
+- **Network Monitor:** Shows all A2A calls (check_availability, propose_event, share_context, relay_message) with timestamps, sender, receiver, tool names, and status
+- **Chat Interfaces:** Natural language responses showing coordination process
+- **State Consistency:** Event confirmed in both agents' session states with consistent status
+- **Error Handling:** Graceful error messages (no crashes) if something goes wrong
+
+### Troubleshooting
+
+If the demo doesn't work as expected:
+
+1. **Check system startup:** Verify all components initialized (agents, MCP servers, A2A endpoints)
+2. **Check Network Monitor:** Should show A2A events if coordination is happening
+3. **Check browser console:** Look for JavaScript errors
+4. **Check logs:** Review terminal output for error messages
+5. **See detailed guide:** Refer to `docs/sprint-artifacts/4-5-manual-testing-guide.md` for comprehensive troubleshooting
 
 This demonstrates the core value proposition: **one request from Alice results in autonomous coordination between the two AI agents**, eliminating the need for back-and-forth messaging.
 
