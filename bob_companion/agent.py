@@ -8,6 +8,7 @@ from pathlib import Path
 from google.adk import Agent, Runner
 from alice_companion.sqlite_session_service import SqliteSessionService
 from google.adk.memory import InMemoryMemoryService
+from bob_companion.user_context import get_bob_context
 
 # Configuration constants
 AGENT_NAME = "bobs_companion"  # Valid identifier (spaces/special chars not allowed)
@@ -43,6 +44,65 @@ runner = Runner(
     session_service=session_service,
     memory_service=memory_service
 )
+
+
+async def _initialize_user_context():
+    """Initialize Bob's user context in session state.
+    
+    Loads Bob's pre-configured context into session state during agent
+    initialization. This happens once, not on every message.
+    """
+    from dataclasses import asdict
+    
+    # Get or create session
+    existing_session = await session_service.get_session(
+        app_name="companion_network",
+        user_id="bob",
+        session_id=SESSION_ID
+    )
+    
+    # Get Bob's context and convert to dict for JSON serialization
+    bob_context = get_bob_context()
+    context_dict = asdict(bob_context)
+    
+    # Prepare session state with user context
+    if existing_session:
+        # Update existing session state
+        state = existing_session.state.copy()
+        state["user_context"] = context_dict
+        await session_service.update_session_state(
+            app_name="companion_network",
+            user_id="bob",
+            session_id=SESSION_ID,
+            state=state
+        )
+    else:
+        # Create new session with context
+        await session_service.create_session(
+            app_name="companion_network",
+            user_id="bob",
+            session_id=SESSION_ID,
+            state={"user_context": context_dict}
+        )
+
+
+# Initialize user context on module import
+# Use safer initialization pattern that handles existing event loops
+import asyncio
+
+def _safe_initialize_context():
+    """Safely initialize user context, handling both sync and async contexts."""
+    try:
+        # Check if there's already a running event loop
+        loop = asyncio.get_running_loop()
+        # If we're in an async context, schedule the task
+        # Note: This won't block, but context will be initialized before first agent use
+        loop.create_task(_initialize_user_context())
+    except RuntimeError:
+        # No running event loop, safe to use asyncio.run()
+        asyncio.run(_initialize_user_context())
+
+_safe_initialize_context()
 
 def run(message: str) -> str:
     """Run the agent with a message and return the response.
