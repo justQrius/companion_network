@@ -18,7 +18,7 @@ from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import JSONResponse
 import uvicorn
 
-from alice_companion.mcp_server import check_availability, propose_event, share_context
+from alice_companion.mcp_server import check_availability, propose_event, share_context, relay_message
 
 logger = logging.getLogger(__name__)
 
@@ -97,6 +97,12 @@ async def handle_jsonrpc(request: Request) -> JSONResponse:
                     category=tool_args.get("category"),
                     purpose=tool_args.get("purpose"),
                     requester=tool_args.get("requester")
+                )
+            elif tool_name == "relay_message":
+                result = await relay_message(
+                    message=tool_args.get("message"),
+                    urgency=tool_args.get("urgency"),
+                    sender=tool_args.get("sender")
                 )
             else:
                 return JSONResponse(

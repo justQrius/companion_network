@@ -200,17 +200,58 @@ def run(message: str) -> str:
     
     This function provides the agent.run() interface required by AC3.
     It wraps runner.run_async() to process messages through the agent.
+    Also checks for pending_messages in session state and displays them before the main response.
     
     Args:
         message: User message to send to the agent
         
     Returns:
-        Agent response as string
+        Agent response as string (includes pending messages if any, followed by main response)
     """
     import asyncio
     from google.genai import types
     
     async def _run_async():
+        # AC5, AC6, AC7: Check for pending_messages in session state before generating response
+        session = await session_service.get_session(
+            app_name="companion_network",
+            user_id="alice",
+            session_id=SESSION_ID
+        )
+        
+        pending_messages_text = ""
+        if session and "pending_messages" in session.state:
+            pending_messages = session.state.get("pending_messages", [])
+            
+            if pending_messages:
+                # AC6: Sort pending_messages by urgency (high → normal → low) for display priority
+                urgency_order = {"high": 0, "normal": 1, "low": 2}
+                sorted_messages = sorted(
+                    pending_messages,
+                    key=lambda m: urgency_order.get(m.get("urgency", "normal"), 1)
+                )
+                
+                # AC7: Format each message with sender attribution: "Message from {sender}: {message}"
+                formatted_messages = []
+                for msg in sorted_messages:
+                    sender = msg.get("sender", "Unknown")
+                    msg_text = msg.get("message", "")
+                    formatted_messages.append(f"Message from {sender.capitalize()}: {msg_text}")
+                
+                if formatted_messages:
+                    pending_messages_text = "\n\n".join(formatted_messages) + "\n\n"
+                
+                # AC5: Clear pending_messages list from session state after displaying
+                state = session.state.copy()
+                state["pending_messages"] = []
+                await session_service.update_session_state(
+                    app_name="companion_network",
+                    user_id="alice",
+                    session_id=SESSION_ID,
+                    state=state
+                )
+        
+        # Generate main agent response
         content = types.Content(role='user', parts=[types.Part(text=message)])
         response_parts = []
         async for event in runner.run_async(
@@ -222,7 +263,13 @@ def run(message: str) -> str:
                 for part in event.content.parts:
                     if part.text:
                         response_parts.append(part.text)
-        return "".join(response_parts)
+        
+        main_response = "".join(response_parts)
+        
+        # AC5: Append formatted messages to agent response (before main response content)
+        if pending_messages_text:
+            return pending_messages_text + main_response
+        return main_response
     
     return asyncio.run(_run_async())
 

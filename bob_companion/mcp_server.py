@@ -390,6 +390,134 @@ async def propose_event(
         }
 
 
+async def relay_message(
+    message: str,
+    urgency: str,
+    sender: str
+) -> Dict[str, Any]:
+    """Relay a message from a trusted contact to Bob.
+    
+    This tool allows trusted contacts to send messages to Bob through his Companion.
+    Messages are queued in session state and displayed to Bob in his next agent interaction.
+    The tool validates the sender is in Bob's trusted_contacts list before accepting the message.
+    
+    Args:
+        message: The message text to relay to Bob (required, non-empty string)
+        urgency: Urgency level (enum: "low", "normal", "high") - affects display priority
+        sender: User ID of the person sending the message (must be in trusted_contacts)
+        
+    Returns:
+        Dictionary with keys:
+        - delivered (bool): True if message was successfully queued, False on failure
+        
+        If sender is not trusted, returns error dict:
+        - error (str): "Access denied"
+        - message (str): "Sender not in trusted contacts"
+        
+        If invalid input, returns error dict:
+        - error (str): "Invalid input"
+        - message (str): Description of validation error
+        
+    Raises:
+        No exceptions raised - all errors return error dictionaries per graceful degradation pattern.
+        
+    Message Storage:
+        Messages are stored in session state under key "pending_messages" as a list.
+        Each message dict contains: message (str), urgency (str), sender (str), timestamp (ISO 8601 string).
+        Messages are displayed to Bob in his next agent response, sorted by urgency priority.
+    """
+    # AC1: Input validation
+    if not message or not isinstance(message, str) or not message.strip():
+        return {
+            "error": "Invalid input",
+            "message": "message must be a non-empty string"
+        }
+    
+    # AC1: Urgency enum validation
+    valid_urgencies = ["low", "normal", "high"]
+    if urgency not in valid_urgencies:
+        return {
+            "error": "Invalid input",
+            "message": f"urgency must be one of: {', '.join(valid_urgencies)}"
+        }
+    
+    if not sender or not isinstance(sender, str) or not sender.strip():
+        return {
+            "error": "Invalid input",
+            "message": "sender must be a non-empty string"
+        }
+    
+    # AC2: Trusted Contact Validation
+    # AC4: Retrieve user context from session state
+    session = await SESSION_SERVICE.get_session(
+        app_name=APP_NAME,
+        user_id=USER_ID,
+        session_id=SESSION_ID
+    )
+    
+    if not session:
+        return {
+            "error": "Session not found",
+            "message": f"Session not found for user_id={USER_ID}, session_id={SESSION_ID}. Session may not have been initialized."
+        }
+    
+    if "user_context" not in session.state:
+        return {
+            "error": "User context missing",
+            "message": f"Session exists but 'user_context' key is missing from session state for user_id={USER_ID}. User context may not have been loaded."
+        }
+    
+    user_context_dict = session.state["user_context"]
+    trusted_contacts = user_context_dict.get("trusted_contacts", [])
+    
+    # AC2: Validate sender is in trusted_contacts
+    if sender not in trusted_contacts:
+        return {
+            "error": "Access denied",
+            "message": "Sender not in trusted contacts"
+        }
+    
+    # AC3: Message Queuing
+    # AC8: Create message dict with fields: message, urgency, sender, timestamp
+    message_dict = {
+        "message": message.strip(),
+        "urgency": urgency,
+        "sender": sender,
+        "timestamp": dt.now().isoformat()
+    }
+    
+    # AC8: Retrieve existing pending_messages list from session state
+    state = session.state.copy()
+    pending_messages = state.get("pending_messages", [])
+    
+    # AC8: Append new message to pending_messages list
+    pending_messages.append(message_dict)
+    
+    # AC8: Store updated pending_messages list back to session state
+    state["pending_messages"] = pending_messages
+    
+    try:
+        await SESSION_SERVICE.update_session_state(
+            app_name=APP_NAME,
+            user_id=USER_ID,
+            session_id=SESSION_ID,
+            state=state
+        )
+    except Exception as e:
+        # AC5: Handle session state write failures
+        logger.error(f"Failed to update session state with pending message: {e}", exc_info=True)
+        return {
+            "error": "Storage failure",
+            "message": "Failed to store message in session state",
+            "delivered": False
+        }
+    
+    # AC4: Return dict with delivered: True if successful
+    return {
+        "delivered": True
+    }
+
+
 async def share_context(
     category: str,
     purpose: str,
