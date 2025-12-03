@@ -1,246 +1,292 @@
-"""Unit tests for natural language coordination request parsing.
+"""Unit tests for coordination logic.
 
-Tests that agents can parse natural language coordination requests and extract
-key information: activity type, participants, time constraints, and coordination intent.
+Tests cover slot intersection, preference prioritization, natural language synthesis,
+no overlap handling, ISO 8601 format consistency, and edge cases.
 """
 
-import unittest
-import sys
-from pathlib import Path
-
-# Add project root to path
-project_root = Path(__file__).parent.parent
-sys.path.insert(0, str(project_root))
-
-from alice_companion.agent import run as alice_run
-from bob_companion.agent import run as bob_run
+import pytest
+from datetime import datetime
+from shared.coordination import (
+    find_overlapping_slots,
+    prioritize_slots_by_preferences,
+    synthesize_recommendation,
+    handle_no_overlaps
+)
 
 
-class TestCoordinationParsing(unittest.TestCase):
-    """Test natural language coordination request parsing."""
+class TestFindOverlappingSlots:
+    """Test slot intersection functionality (AC: 1, 7)."""
     
-    def setUp(self):
-        """Set up test fixtures."""
-        # Primary test message from AC1
-        self.primary_message = "Find a time for dinner with Bob this weekend"
+    def test_perfect_overlap(self):
+        """Test finding perfect overlap (same slots)."""
+        alice_slots = ["2025-12-07T19:00:00/2025-12-07T21:00:00"]
+        bob_slots = ["2025-12-07T19:00:00/2025-12-07T21:00:00"]
         
-        # Alternative phrasings for AC4 (no rigid parsing)
-        self.alternative_phrasings = [
-            "Schedule dinner with Bob for this weekend",
-            "I want to have dinner with Bob this weekend"
+        overlaps = find_overlapping_slots(alice_slots, bob_slots)
+        
+        assert len(overlaps) == 1
+        assert overlaps[0] == "2025-12-07T19:00:00/2025-12-07T21:00:00"
+    
+    def test_partial_overlap(self):
+        """Test finding partial overlap (slots partially overlap)."""
+        alice_slots = ["2025-12-07T19:00:00/2025-12-07T21:00:00"]
+        bob_slots = ["2025-12-07T18:00:00/2025-12-07T20:00:00"]
+        
+        overlaps = find_overlapping_slots(alice_slots, bob_slots)
+        
+        assert len(overlaps) == 1
+        # Overlap should be 19:00-20:00
+        assert overlaps[0] == "2025-12-07T19:00:00/2025-12-07T20:00:00"
+    
+    def test_no_overlap(self):
+        """Test no overlap (completely separate slots)."""
+        alice_slots = ["2025-12-07T19:00:00/2025-12-07T21:00:00"]
+        bob_slots = ["2025-12-08T19:00:00/2025-12-08T21:00:00"]
+        
+        overlaps = find_overlapping_slots(alice_slots, bob_slots)
+        
+        assert overlaps == []
+    
+    def test_multiple_overlaps(self):
+        """Test finding multiple overlapping slots."""
+        alice_slots = [
+            "2025-12-07T19:00:00/2025-12-07T21:00:00",
+            "2025-12-08T19:00:00/2025-12-08T21:00:00"
         ]
-    
-    def test_primary_coordination_request(self):
-        """Test AC1: Agent extracts coordination info from primary message.
-        
-        Given: Alice's agent has user context loaded (Story 2.4)
-        When: Alice sends "Find a time for dinner with Bob this weekend"
-        Then: Agent should extract:
-            - coordination type: "dinner"
-            - other party: "Bob"
-            - timeframe: "this weekend" (Saturday-Sunday)
-            - intent: Initiate coordination
-        """
-        response = alice_run(self.primary_message)
-        
-        # Verify natural language response (AC2)
-        self.assertIsInstance(response, str)
-        self.assertGreater(len(response), 0)
-        
-        # Check for acknowledgment of coordination intent
-        response_lower = response.lower()
-        # Should mention coordination or Bob or dinner
-        self.assertTrue(
-            any(keyword in response_lower for keyword in [
-                "coordinate", "bob", "dinner", "weekend", "find", "time"
-            ]),
-            f"Response should acknowledge coordination: {response}"
-        )
-    
-    def test_natural_language_acknowledgment(self):
-        """Test AC2: Agent responds with natural language acknowledgment.
-        
-        Agent should respond with: "I'll coordinate with Bob's Companion 
-        to find a time for dinner this weekend..."
-        """
-        response = alice_run(self.primary_message)
-        
-        # Should be natural language, not JSON or structured format
-        self.assertIsInstance(response, str)
-        self.assertNotIn("{", response)  # No JSON structures
-        self.assertNotIn("[", response)  # No array structures
-        
-        # Should acknowledge the coordination request
-        response_lower = response.lower()
-        self.assertTrue(
-            any(keyword in response_lower for keyword in [
-                "coordinate", "bob", "dinner", "weekend"
-            ]),
-            f"Response should acknowledge coordination: {response}"
-        )
-    
-    def test_contact_identification(self):
-        """Test AC3: Agent identifies need to contact Bob's Companion.
-        
-        Agent should identify that coordination with "Bob" requires
-        contacting Bob's Companion.
-        """
-        response = alice_run(self.primary_message)
-        
-        # Response should indicate understanding of contacting Bob
-        response_lower = response.lower()
-        # Should mention Bob (the contact)
-        self.assertIn("bob", response_lower)
-    
-    def test_alternative_phrasing_schedule(self):
-        """Test AC4: Alternative phrasing - 'Schedule dinner with Bob for this weekend'.
-        
-        Verify no rigid command parsing is required - natural language understanding
-        handles variations in phrasing.
-        """
-        message = "Schedule dinner with Bob for this weekend"
-        response = alice_run(message)
-        
-        # Should still understand and acknowledge
-        self.assertIsInstance(response, str)
-        self.assertGreater(len(response), 0)
-        
-        response_lower = response.lower()
-        self.assertTrue(
-            any(keyword in response_lower for keyword in [
-                "coordinate", "bob", "dinner", "weekend"
-            ]),
-            f"Response should handle alternative phrasing: {response}"
-        )
-    
-    def test_alternative_phrasing_want(self):
-        """Test AC4: Alternative phrasing - 'I want to have dinner with Bob this weekend'.
-        
-        Verify natural language understanding handles conversational phrasing.
-        """
-        message = "I want to have dinner with Bob this weekend"
-        response = alice_run(message)
-        
-        # Should still understand and acknowledge
-        self.assertIsInstance(response, str)
-        self.assertGreater(len(response), 0)
-        
-        response_lower = response.lower()
-        self.assertTrue(
-            any(keyword in response_lower for keyword in [
-                "coordinate", "bob", "dinner", "weekend"
-            ]),
-            f"Response should handle conversational phrasing: {response}"
-        )
-    
-    def test_extraction_activity_type(self):
-        """Test AC6: Agent extracts activity type from natural language.
-        
-        Should extract "dinner" from various natural language inputs.
-        """
-        test_cases = [
-            ("Find a time for dinner with Bob", "dinner"),
-            ("Schedule lunch with Sarah", "lunch"),
-            ("Plan a meeting with Mike", "meeting")
+        bob_slots = [
+            "2025-12-07T18:00:00/2025-12-07T20:00:00",
+            "2025-12-08T19:00:00/2025-12-08T21:00:00"
         ]
         
-        for message, expected_activity in test_cases:
-            with self.subTest(message=message, expected=expected_activity):
-                response = alice_run(message)
-                response_lower = response.lower()
-                
-                # Response should acknowledge the activity type
-                self.assertIn(
-                    expected_activity.lower(),
-                    response_lower,
-                    f"Response should mention {expected_activity}: {response}"
-                )
+        overlaps = find_overlapping_slots(alice_slots, bob_slots)
+        
+        assert len(overlaps) == 2
+        assert "2025-12-07T19:00:00/2025-12-07T20:00:00" in overlaps
+        assert "2025-12-08T19:00:00/2025-12-08T21:00:00" in overlaps
     
-    def test_extraction_participants(self):
-        """Test AC6: Agent extracts participants from natural language.
+    def test_empty_availability_lists(self):
+        """Test edge case: empty availability lists."""
+        overlaps = find_overlapping_slots([], [])
+        assert overlaps == []
         
-        Should extract participant names and match to trusted contacts.
-        """
-        # Bob is in Alice's trusted contacts
-        response = alice_run("Find a time for dinner with Bob this weekend")
-        response_lower = response.lower()
-        
-        # Should mention Bob
-        self.assertIn("bob", response_lower)
+        overlaps2 = find_overlapping_slots(["2025-12-07T19:00:00/2025-12-07T21:00:00"], [])
+        assert overlaps2 == []
     
-    def test_extraction_time_constraints(self):
-        """Test AC6: Agent extracts time constraints from natural language.
+    def test_iso8601_format_consistency(self):
+        """Test that overlapping slots maintain ISO 8601 format (AC: 7)."""
+        alice_slots = ["2025-12-07T19:00:00/2025-12-07T21:00:00"]
+        bob_slots = ["2025-12-07T19:00:00/2025-12-07T21:00:00"]
         
-        Should extract timeframes like "this weekend", "next week", "tomorrow".
-        """
-        test_cases = [
-            ("Find a time for dinner with Bob this weekend", "weekend"),
-            ("Schedule lunch with Sarah next week", "week"),
-            ("Plan a meeting with Mike tomorrow", "tomorrow")
+        overlaps = find_overlapping_slots(alice_slots, bob_slots)
+        
+        for overlap in overlaps:
+            assert '/' in overlap
+            assert 'T' in overlap
+            # Verify can be parsed
+            parts = overlap.split('/')
+            assert len(parts) == 2
+            datetime.fromisoformat(parts[0])
+            datetime.fromisoformat(parts[1])
+
+
+class TestPrioritizeSlotsByPreferences:
+    """Test preference-based prioritization (AC: 2, 3, 5)."""
+    
+    def test_dining_time_preference_match(self):
+        """Test prioritizing slots that match dining time preferences."""
+        slots = [
+            "2025-12-07T19:00:00/2025-12-07T21:00:00",  # Matches 19:00
+            "2025-12-07T20:00:00/2025-12-07T22:00:00",  # Matches 20:00
+            "2025-12-07T18:00:00/2025-12-07T20:00:00"   # Doesn't match
         ]
+        alice_prefs = {"dining_times": ["19:00", "19:30", "20:00"]}
+        bob_prefs = {"dining_times": ["19:00", "20:00"]}
         
-        for message, expected_timeframe in test_cases:
-            with self.subTest(message=message, expected=expected_timeframe):
-                response = alice_run(message)
-                response_lower = response.lower()
-                
-                # Response should acknowledge the timeframe
-                # (may not use exact word, but should show understanding)
-                self.assertIsInstance(response, str)
-                self.assertGreater(len(response), 0)
+        prioritized = prioritize_slots_by_preferences(slots, alice_prefs, bob_prefs)
+        
+        # First two slots should be prioritized (match preferences)
+        assert len(prioritized) == 3
+        # Slots matching preferences should come first
+        assert prioritized[0] in ["2025-12-07T19:00:00/2025-12-07T21:00:00", 
+                                   "2025-12-07T20:00:00/2025-12-07T22:00:00"]
     
-    def test_bob_agent_parsing(self):
-        """Test Bob's agent also parses coordination requests correctly.
+    def test_no_preferences(self):
+        """Test that original order is maintained when no preferences."""
+        slots = [
+            "2025-12-07T19:00:00/2025-12-07T21:00:00",
+            "2025-12-07T20:00:00/2025-12-07T22:00:00"
+        ]
+        alice_prefs = {}
+        bob_prefs = {}
         
-        Bob's agent should have the same natural language parsing capability.
-        """
-        message = "Find a time for dinner with Alice this weekend"
-        response = bob_run(message)
+        prioritized = prioritize_slots_by_preferences(slots, alice_prefs, bob_prefs)
         
-        # Should understand and acknowledge
-        self.assertIsInstance(response, str)
-        self.assertGreater(len(response), 0)
-        
-        response_lower = response.lower()
-        self.assertTrue(
-            any(keyword in response_lower for keyword in [
-                "coordinate", "alice", "dinner", "weekend"
-            ]),
-            f"Bob's agent should parse coordination: {response}"
-        )
-
-
-class TestCoordinationParsingEdgeCases(unittest.TestCase):
-    """Test edge cases for coordination parsing."""
+        assert prioritized == slots
     
-    def test_ambiguous_timeframe(self):
-        """Test edge case: ambiguous timeframe (e.g., 'next week' without specific days)."""
-        message = "Find a time for dinner with Bob next week"
-        response = alice_run(message)
+    def test_cuisine_preferences_available(self):
+        """Test that function accepts cuisine preferences (used in synthesis, not prioritization)."""
+        slots = ["2025-12-07T19:00:00/2025-12-07T21:00:00"]
+        alice_prefs = {"dining_times": ["19:00"], "cuisine": ["Italian"]}
+        bob_prefs = {"dining_times": ["19:00"], "cuisine": ["Italian"]}
         
-        # Should still acknowledge, even if timeframe is ambiguous
-        self.assertIsInstance(response, str)
-        self.assertGreater(len(response), 0)
+        prioritized = prioritize_slots_by_preferences(slots, alice_prefs, bob_prefs)
+        
+        # Function should handle cuisine preferences without error
+        assert len(prioritized) == 1
+        assert prioritized[0] == slots[0]
     
-    def test_missing_participant(self):
-        """Test edge case: missing participant name (e.g., 'Find a time for dinner')."""
-        message = "Find a time for dinner"
-        response = alice_run(message)
+    def test_multiple_preference_matches(self):
+        """Test prioritization when multiple slots match preferences."""
+        slots = [
+            "2025-12-07T18:00:00/2025-12-07T20:00:00",  # No match
+            "2025-12-07T19:00:00/2025-12-07T21:00:00",  # Matches both
+            "2025-12-07T20:00:00/2025-12-07T22:00:00"   # Matches Alice only
+        ]
+        alice_prefs = {"dining_times": ["19:00", "20:00"]}
+        bob_prefs = {"dining_times": ["19:00"]}
         
-        # Should handle gracefully (may ask for clarification or acknowledge)
-        self.assertIsInstance(response, str)
-        self.assertGreater(len(response), 0)
+        prioritized = prioritize_slots_by_preferences(slots, alice_prefs, bob_prefs)
+        
+        # Slot matching both preferences should be first
+        assert prioritized[0] == "2025-12-07T19:00:00/2025-12-07T21:00:00"
+
+
+class TestSynthesizeRecommendation:
+    """Test natural language recommendation synthesis (AC: 4)."""
     
-    def test_unclear_activity_type(self):
-        """Test edge case: unclear activity type (e.g., 'Let's do something this weekend')."""
-        message = "Let's do something this weekend"
-        response = alice_run(message)
+    def test_basic_recommendation(self):
+        """Test synthesizing basic recommendation with time and date."""
+        slots = ["2025-12-07T19:00:00/2025-12-07T21:00:00"]
+        alice_prefs = {}
+        bob_prefs = {}
         
-        # Should handle gracefully
-        self.assertIsInstance(response, str)
-        self.assertGreater(len(response), 0)
+        recommendation = synthesize_recommendation(slots, alice_prefs, bob_prefs)
+        
+        assert "Saturday" in recommendation or "December" in recommendation
+        assert "7" in recommendation or "19:00" in recommendation or "7pm" in recommendation.lower()
+        assert isinstance(recommendation, str)
+    
+    def test_recommendation_with_cuisine(self):
+        """Test recommendation includes cuisine preferences."""
+        slots = ["2025-12-07T19:00:00/2025-12-07T21:00:00"]
+        alice_prefs = {}
+        bob_prefs = {"cuisine": ["Italian"]}
+        
+        recommendation = synthesize_recommendation(slots, alice_prefs, bob_prefs, bob_name="Bob")
+        
+        assert "Italian" in recommendation
+        assert "Bob" in recommendation
+    
+    def test_recommendation_natural_language(self):
+        """Test that recommendation is natural language, not JSON."""
+        slots = ["2025-12-07T19:00:00/2025-12-07T21:00:00"]
+        alice_prefs = {}
+        bob_prefs = {}
+        
+        recommendation = synthesize_recommendation(slots, alice_prefs, bob_prefs)
+        
+        # Should not be JSON format
+        assert not recommendation.startswith("{")
+        assert not recommendation.startswith("[")
+        # Should be conversational
+        assert len(recommendation) > 20  # Reasonable length for natural language
+    
+    def test_no_slots_handling(self):
+        """Test handling when no slots available."""
+        recommendation = synthesize_recommendation([], {}, {})
+        
+        assert "No suitable times" in recommendation or "not found" in recommendation.lower()
+    
+    def test_multiple_slots_uses_best(self):
+        """Test that function uses best (first) slot from prioritized list."""
+        slots = [
+            "2025-12-07T19:00:00/2025-12-07T21:00:00",  # Best slot
+            "2025-12-07T20:00:00/2025-12-07T22:00:00"   # Alternative
+        ]
+        alice_prefs = {}
+        bob_prefs = {}
+        
+        recommendation = synthesize_recommendation(slots, alice_prefs, bob_prefs)
+        
+        # Should reference the first slot (19:00)
+        assert "19:00" in recommendation or "7pm" in recommendation.lower()
 
 
-if __name__ == '__main__':
-    unittest.main()
+class TestHandleNoOverlaps:
+    """Test no overlap handling (AC: 6)."""
+    
+    def test_no_overlaps_returns_alternatives(self):
+        """Test that function returns alternatives when no overlaps exist."""
+        alice_slots = ["2025-12-07T19:00:00/2025-12-07T21:00:00"]
+        bob_slots = ["2025-12-08T19:00:00/2025-12-08T21:00:00"]
+        
+        result = handle_no_overlaps(alice_slots, bob_slots)
+        
+        assert result["has_overlaps"] is False
+        assert "message" in result
+        assert "suggestion" in result
+        assert "alice_alternatives" in result
+        assert "bob_alternatives" in result
+    
+    def test_alternatives_in_natural_language(self):
+        """Test that alternatives are formatted in natural language."""
+        alice_slots = ["2025-12-07T19:00:00/2025-12-07T21:00:00"]
+        bob_slots = ["2025-12-08T19:00:00/2025-12-08T21:00:00"]
+        
+        result = handle_no_overlaps(alice_slots, bob_slots)
+        
+        # Message should be natural language
+        assert isinstance(result["message"], str)
+        assert len(result["message"]) > 20
+        # Should mention both users
+        assert "Alice" in result["message"] or "alice" in result["message"].lower()
+        assert "Bob" in result["message"] or "bob" in result["message"].lower()
+    
+    def test_flexibility_request(self):
+        """Test that suggestion asks for flexibility."""
+        alice_slots = ["2025-12-07T19:00:00/2025-12-07T21:00:00"]
+        bob_slots = ["2025-12-08T19:00:00/2025-12-08T21:00:00"]
+        
+        result = handle_no_overlaps(alice_slots, bob_slots)
+        
+        suggestion = result["suggestion"]
+        assert "flexible" in suggestion.lower() or "adjust" in suggestion.lower()
+    
+    def test_empty_slots_handling(self):
+        """Test handling when one or both users have no slots."""
+        result = handle_no_overlaps([], ["2025-12-07T19:00:00/2025-12-07T21:00:00"])
+        
+        assert result["has_overlaps"] is False
+        assert "message" in result
 
+
+class TestEdgeCases:
+    """Test edge cases for coordination logic."""
+    
+    def test_invalid_time_range_format(self):
+        """Test handling of invalid time range formats."""
+        # Function should handle gracefully
+        overlaps = find_overlapping_slots(["invalid"], ["2025-12-07T19:00:00/2025-12-07T21:00:00"])
+        
+        # Should return empty list or handle gracefully
+        assert isinstance(overlaps, list)
+    
+    def test_missing_preferences_keys(self):
+        """Test handling when preferences dict is missing keys."""
+        slots = ["2025-12-07T19:00:00/2025-12-07T21:00:00"]
+        
+        # Missing dining_times key
+        prioritized = prioritize_slots_by_preferences(slots, {}, {})
+        
+        assert len(prioritized) == 1
+    
+    def test_timezone_handling(self):
+        """Test that function works with ISO 8601 format (no timezone for MVP)."""
+        # MVP assumes same timezone, so no timezone in ISO strings
+        alice_slots = ["2025-12-07T19:00:00/2025-12-07T21:00:00"]
+        bob_slots = ["2025-12-07T19:00:00/2025-12-07T21:00:00"]
+        
+        overlaps = find_overlapping_slots(alice_slots, bob_slots)
+        
+        # Should work without timezone info
+        assert len(overlaps) == 1

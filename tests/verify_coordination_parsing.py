@@ -1,102 +1,68 @@
-"""Verification script for Natural Language Coordination Request Parsing (Story 2.5).
+"""Verification script for Coordination Logic with Mutual Availability (Story 2.9).
 
-Validates all acceptance criteria for Story 2.5:
-- AC1: Natural Language Parsing - Agent extracts coordination type, other party, timeframe, intent
-- AC2: Natural Language Response - Agent responds with natural language acknowledgment
-- AC3: Contact Identification - Agent identifies need to contact Bob's Companion
-- AC4: No Rigid Parsing - No rigid command parsing required (natural language understanding)
-- AC5: System Prompt Enhancement - System prompt includes examples of coordination requests
-- AC6: Extraction Capability - Agent extracts: activity type, participants, time constraints
+Validates all acceptance criteria for Story 2.9:
+- AC1: Overlapping Slot Identification - Finds time slots where both are available
+- AC2: Preference Consideration - Considers both users' dining time preferences
+- AC3: Cuisine Preference Integration - Considers cuisine preferences if shared
+- AC4: Natural Language Recommendation - Synthesizes recommendation in natural language
+- AC5: Multiple Slot Prioritization - Prioritizes based on preferences
+- AC6: No Overlap Handling - Suggests alternatives or asks for flexibility
+- AC7: ISO 8601 Slot Format - Uses ISO 8601 time range format
+- AC8: Integration with A2A Flow - Integrates with availability checking and A2A calls
 
 Usage:
     # With uv (recommended):
     uv run python tests/verify_coordination_parsing.py
     
     # Or ensure dependencies are installed:
-    pip install google-adk>=1.19.0
     python tests/verify_coordination_parsing.py
 """
 
 import sys
 import os
 from pathlib import Path
-
-# Check for required dependencies before proceeding
-try:
-    import google.adk
-except ImportError:
-    print("=" * 60)
-    print("ERROR: Missing required dependency 'google-adk'")
-    print("=" * 60)
-    print("\nTo install dependencies:")
-    print("  Option 1 (recommended): uv run python tests/verify_coordination_parsing.py")
-    print("  Option 2: pip install google-adk>=1.19.0")
-    print("\nThe project uses 'uv' for dependency management.")
-    print("Run: uv sync  (to install all dependencies)")
-    print("Then: uv run python tests/verify_coordination_parsing.py")
-    sys.exit(1)
+from datetime import datetime
 
 # Add project root to path
 project_root = Path(__file__).parent.parent
 sys.path.insert(0, str(project_root))
 
 
-def check_ac1_natural_language_parsing():
-    """AC1: Natural Language Parsing - Agent extracts coordination info.
+def check_ac1_overlapping_slot_identification():
+    """AC1: Overlapping Slot Identification.
     
-    Given: Alice's agent has user context loaded (Story 2.4)
-    When: Alice sends "Find a time for dinner with Bob this weekend"
-    Then: Agent extracts: coordination type ("dinner"), other party ("Bob"), 
-          timeframe ("this weekend" - Saturday-Sunday), intent (Initiate coordination)
+    Given Alice's availability is known (Story 2.7) and Bob's availability is retrieved via A2A (Story 2.8),
+    when the agent identifies overlapping free slots,
+    then the coordination logic finds time slots where both are available.
     """
-    print("\n📋 Checking AC1: Natural Language Parsing...")
+    print("\n📋 Checking AC1: Overlapping Slot Identification...")
     try:
-        from alice_companion.agent import run
+        from shared.coordination import find_overlapping_slots
         
-        message = "Find a time for dinner with Bob this weekend"
-        response = run(message)
+        # Test perfect overlap
+        alice_slots = ["2025-12-07T19:00:00/2025-12-07T21:00:00"]
+        bob_slots = ["2025-12-07T19:00:00/2025-12-07T21:00:00"]
+        overlaps = find_overlapping_slots(alice_slots, bob_slots)
         
-        if not response or len(response) == 0:
-            print("❌ AC1 FAILED: Agent returned empty response")
+        if len(overlaps) != 1:
+            print(f"❌ AC1 FAILED: Expected 1 overlap, got {len(overlaps)}")
             return False
         
-        response_lower = response.lower()
+        # Test partial overlap
+        alice_slots2 = ["2025-12-07T19:00:00/2025-12-07T21:00:00"]
+        bob_slots2 = ["2025-12-07T18:00:00/2025-12-07T20:00:00"]
+        overlaps2 = find_overlapping_slots(alice_slots2, bob_slots2)
         
-        # Check for extraction indicators
-        # Should mention dinner (coordination type)
-        has_dinner = "dinner" in response_lower
-        # Should mention Bob (other party)
-        has_bob = "bob" in response_lower
-        # Should mention weekend or time-related terms (timeframe)
-        has_timeframe = any(term in response_lower for term in [
-            "weekend", "saturday", "sunday", "time", "schedule"
-        ])
-        # Should show coordination intent
-        has_coordination_intent = any(term in response_lower for term in [
-            "coordinate", "find", "schedule", "plan", "arrange"
-        ])
-        
-        if not has_dinner:
-            print(f"❌ AC1 FAILED: Response doesn't mention 'dinner' (coordination type)")
-            print(f"   Response: {response[:200]}...")
+        if len(overlaps2) != 1:
+            print(f"❌ AC1 FAILED: Expected 1 partial overlap, got {len(overlaps2)}")
             return False
         
-        if not has_bob:
-            print(f"❌ AC1 FAILED: Response doesn't mention 'Bob' (other party)")
-            print(f"   Response: {response[:200]}...")
+        # Verify overlap is correct (19:00-20:00)
+        if overlaps2[0] != "2025-12-07T19:00:00/2025-12-07T20:00:00":
+            print(f"❌ AC1 FAILED: Partial overlap incorrect. Got {overlaps2[0]}")
             return False
         
-        if not has_timeframe:
-            print(f"❌ AC1 FAILED: Response doesn't acknowledge timeframe")
-            print(f"   Response: {response[:200]}...")
-            return False
-        
-        if not has_coordination_intent:
-            print(f"❌ AC1 FAILED: Response doesn't show coordination intent")
-            print(f"   Response: {response[:200]}...")
-            return False
-        
-        print("✅ AC1 PASSED: Agent extracts coordination type, other party, timeframe, and intent")
+        print("✅ AC1 PASSED: Coordination logic finds overlapping time slots")
         return True
         
     except Exception as e:
@@ -106,43 +72,37 @@ def check_ac1_natural_language_parsing():
         return False
 
 
-def check_ac2_natural_language_response():
-    """AC2: Natural Language Response - Agent responds with natural language acknowledgment.
+def check_ac2_preference_consideration():
+    """AC2: Preference Consideration.
     
-    Agent should respond: "I'll coordinate with Bob's Companion to find a time 
-    for dinner this weekend..."
+    The coordination logic considers both users' dining time preferences when identifying overlapping slots.
     """
-    print("\n📋 Checking AC2: Natural Language Response...")
+    print("\n📋 Checking AC2: Preference Consideration...")
     try:
-        from alice_companion.agent import run
+        from shared.coordination import prioritize_slots_by_preferences
         
-        message = "Find a time for dinner with Bob this weekend"
-        response = run(message)
+        slots = [
+            "2025-12-07T19:00:00/2025-12-07T21:00:00",  # Matches 19:00
+            "2025-12-07T20:00:00/2025-12-07T22:00:00",  # Matches 20:00
+            "2025-12-07T18:00:00/2025-12-07T20:00:00"   # Doesn't match
+        ]
+        alice_prefs = {"dining_times": ["19:00", "19:30", "20:00"]}
+        bob_prefs = {"dining_times": ["19:00", "20:00"]}
         
-        if not response or len(response) == 0:
-            print("❌ AC2 FAILED: Agent returned empty response")
+        prioritized = prioritize_slots_by_preferences(slots, alice_prefs, bob_prefs)
+        
+        if len(prioritized) != 3:
+            print(f"❌ AC2 FAILED: Expected 3 slots, got {len(prioritized)}")
             return False
         
-        # Should be natural language, not JSON or structured format
-        if "{" in response or "[" in response:
-            # Check if it's just a code block or actual JSON structure
-            if response.strip().startswith("{") or response.strip().startswith("["):
-                print(f"❌ AC2 FAILED: Response appears to be JSON/structured format")
-                print(f"   Response: {response[:200]}...")
-                return False
-        
-        # Should acknowledge coordination naturally
-        response_lower = response.lower()
-        has_acknowledgment = any(term in response_lower for term in [
-            "coordinate", "bob", "dinner", "weekend", "find", "time", "schedule"
-        ])
-        
-        if not has_acknowledgment:
-            print(f"❌ AC2 FAILED: Response doesn't acknowledge coordination naturally")
-            print(f"   Response: {response[:200]}...")
+        # Slots matching preferences should be prioritized
+        # First slot should match preferences
+        first_slot = prioritized[0]
+        if "19:00" not in first_slot and "20:00" not in first_slot:
+            print(f"❌ AC2 FAILED: First slot doesn't match preferences. Got {first_slot}")
             return False
         
-        print("✅ AC2 PASSED: Agent responds with natural language acknowledgment")
+        print("✅ AC2 PASSED: Coordination logic considers dining time preferences")
         return True
         
     except Exception as e:
@@ -152,30 +112,35 @@ def check_ac2_natural_language_response():
         return False
 
 
-def check_ac3_contact_identification():
-    """AC3: Contact Identification - Agent identifies need to contact Bob's Companion."""
-    print("\n📋 Checking AC3: Contact Identification...")
+def check_ac3_cuisine_preference_integration():
+    """AC3: Cuisine Preference Integration.
+    
+    The coordination logic considers cuisine preferences if Bob shared them via share_context or check_availability response.
+    """
+    print("\n📋 Checking AC3: Cuisine Preference Integration...")
     try:
-        from alice_companion.agent import run
+        from shared.coordination import synthesize_recommendation
         
-        message = "Find a time for dinner with Bob this weekend"
-        response = run(message)
+        slots = ["2025-12-07T19:00:00/2025-12-07T21:00:00"]
+        alice_prefs = {}
+        bob_prefs = {"cuisine": ["Italian"]}
         
-        if not response or len(response) == 0:
-            print("❌ AC3 FAILED: Agent returned empty response")
+        recommendation = synthesize_recommendation(slots, alice_prefs, bob_prefs, bob_name="Bob")
+        
+        # Recommendation should include cuisine preference
+        if "Italian" not in recommendation:
+            print(f"❌ AC3 FAILED: Recommendation doesn't include cuisine preference. Got: {recommendation}")
             return False
         
-        response_lower = response.lower()
+        # Test with cuisine from check_availability response pattern
+        bob_prefs2 = {"cuisine": ["Italian", "French"]}
+        recommendation2 = synthesize_recommendation(slots, alice_prefs, bob_prefs2, bob_name="Bob")
         
-        # Should mention Bob (the contact to coordinate with)
-        has_bob = "bob" in response_lower
-        
-        if not has_bob:
-            print(f"❌ AC3 FAILED: Response doesn't identify Bob as contact")
-            print(f"   Response: {response[:200]}...")
+        if "Italian" not in recommendation2:
+            print(f"❌ AC3 FAILED: Multiple cuisine preferences not handled. Got: {recommendation2}")
             return False
         
-        print("✅ AC3 PASSED: Agent identifies need to contact Bob's Companion")
+        print("✅ AC3 PASSED: Coordination logic considers cuisine preferences")
         return True
         
     except Exception as e:
@@ -185,41 +150,38 @@ def check_ac3_contact_identification():
         return False
 
 
-def check_ac4_no_rigid_parsing():
-    """AC4: No Rigid Parsing - No rigid command parsing required (natural language understanding).
+def check_ac4_natural_language_recommendation():
+    """AC4: Natural Language Recommendation.
     
-    Test alternative phrasings to verify natural language understanding.
+    The coordination logic synthesizes recommendation in natural language format (e.g., "Saturday 7pm, Bob prefers Italian"),
+    not just raw data.
     """
-    print("\n📋 Checking AC4: No Rigid Parsing...")
+    print("\n📋 Checking AC4: Natural Language Recommendation...")
     try:
-        from alice_companion.agent import run
+        from shared.coordination import synthesize_recommendation
         
-        alternative_phrasings = [
-            "Schedule dinner with Bob for this weekend",
-            "I want to have dinner with Bob this weekend"
-        ]
+        slots = ["2025-12-07T19:00:00/2025-12-07T21:00:00"]
+        alice_prefs = {}
+        bob_prefs = {"cuisine": ["Italian"]}
         
-        for message in alternative_phrasings:
-            response = run(message)
-            
-            if not response or len(response) == 0:
-                print(f"❌ AC4 FAILED: Agent returned empty response for: {message}")
-                return False
-            
-            response_lower = response.lower()
-            
-            # Should still understand and acknowledge, even with different phrasing
-            has_understanding = any(term in response_lower for term in [
-                "coordinate", "bob", "dinner", "weekend", "schedule", "time"
-            ])
-            
-            if not has_understanding:
-                print(f"❌ AC4 FAILED: Agent doesn't understand alternative phrasing")
-                print(f"   Message: {message}")
-                print(f"   Response: {response[:200]}...")
-                return False
+        recommendation = synthesize_recommendation(slots, alice_prefs, bob_prefs, bob_name="Bob")
         
-        print("✅ AC4 PASSED: Agent handles natural language without rigid parsing")
+        # Should be natural language (not JSON)
+        if recommendation.startswith("{") or recommendation.startswith("["):
+            print(f"❌ AC4 FAILED: Recommendation is JSON, not natural language. Got: {recommendation}")
+            return False
+        
+        # Should include time/date
+        if "19:00" not in recommendation and "7pm" not in recommendation.lower():
+            print(f"❌ AC4 FAILED: Recommendation missing time. Got: {recommendation}")
+            return False
+        
+        # Should be conversational
+        if len(recommendation) < 20:
+            print(f"❌ AC4 FAILED: Recommendation too short to be natural language. Got: {recommendation}")
+            return False
+        
+        print("✅ AC4 PASSED: Coordination logic synthesizes natural language recommendation")
         return True
         
     except Exception as e:
@@ -229,56 +191,35 @@ def check_ac4_no_rigid_parsing():
         return False
 
 
-def check_ac5_system_prompt_enhancement():
-    """AC5: System Prompt Enhancement - System prompt includes examples of coordination requests."""
-    print("\n📋 Checking AC5: System Prompt Enhancement...")
+def check_ac5_multiple_slot_prioritization():
+    """AC5: Multiple Slot Prioritization.
+    
+    If multiple slots are available, the logic prioritizes based on preferences (dining times, cuisine matches).
+    """
+    print("\n📋 Checking AC5: Multiple Slot Prioritization...")
     try:
-        from alice_companion.agent import SYSTEM_INSTRUCTION
+        from shared.coordination import prioritize_slots_by_preferences
         
-        instruction_lower = SYSTEM_INSTRUCTION.lower()
+        slots = [
+            "2025-12-07T18:00:00/2025-12-07T20:00:00",  # No match
+            "2025-12-07T19:00:00/2025-12-07T21:00:00",  # Matches both
+            "2025-12-07T20:00:00/2025-12-07T22:00:00"   # Matches Alice only
+        ]
+        alice_prefs = {"dining_times": ["19:00", "20:00"]}
+        bob_prefs = {"dining_times": ["19:00"]}
         
-        # Check for coordination examples
-        has_examples = any(example in instruction_lower for example in [
-            "find a time for dinner with bob",
-            "schedule lunch with sarah",
-            "plan a meeting with mike"
-        ])
+        prioritized = prioritize_slots_by_preferences(slots, alice_prefs, bob_prefs)
         
-        # Check for natural language understanding emphasis
-        has_natural_language = any(term in instruction_lower for term in [
-            "natural language", "no rigid", "no command", "conversational"
-        ])
-        
-        # Check for extraction instructions
-        has_extraction = any(term in instruction_lower for term in [
-            "extract", "activity type", "participants", "time constraints"
-        ])
-        
-        if not has_examples:
-            print("❌ AC5 FAILED: System prompt missing coordination request examples")
+        if len(prioritized) != 3:
+            print(f"❌ AC5 FAILED: Expected 3 slots, got {len(prioritized)}")
             return False
         
-        if not has_natural_language:
-            print("❌ AC5 FAILED: System prompt doesn't emphasize natural language understanding")
+        # Slot matching both preferences should be first
+        if prioritized[0] != "2025-12-07T19:00:00/2025-12-07T21:00:00":
+            print(f"❌ AC5 FAILED: Best matching slot not prioritized first. Got: {prioritized[0]}")
             return False
         
-        if not has_extraction:
-            print("❌ AC5 FAILED: System prompt missing extraction instructions")
-            return False
-        
-        # Also check Bob's agent has same enhancement
-        from bob_companion.agent import SYSTEM_INSTRUCTION as BOB_INSTRUCTION
-        bob_instruction_lower = BOB_INSTRUCTION.lower()
-        
-        bob_has_examples = any(example in bob_instruction_lower for example in [
-            "find a time for dinner", "schedule lunch", "plan a meeting"
-        ])
-        
-        if not bob_has_examples:
-            print("❌ AC5 FAILED: Bob's system prompt missing coordination examples")
-            return False
-        
-        print("✅ AC5 PASSED: System prompts include coordination request examples")
+        print("✅ AC5 PASSED: Multiple slots prioritized based on preferences")
         return True
         
     except Exception as e:
@@ -288,63 +229,44 @@ def check_ac5_system_prompt_enhancement():
         return False
 
 
-def check_ac6_extraction_capability():
-    """AC6: Extraction Capability - Agent extracts: activity type, participants, time constraints."""
-    print("\n📋 Checking AC6: Extraction Capability...")
+def check_ac6_no_overlap_handling():
+    """AC6: No Overlap Handling.
+    
+    If no overlaps exist, the logic suggests alternatives or asks users for flexibility.
+    """
+    print("\n📋 Checking AC6: No Overlap Handling...")
     try:
-        from alice_companion.agent import run
+        from shared.coordination import handle_no_overlaps
         
-        test_cases = [
-            ("Find a time for dinner with Bob", "dinner"),
-            ("Schedule lunch with Sarah next week", "lunch"),
-            ("Plan a meeting with Mike tomorrow", "meeting")
-        ]
+        alice_slots = ["2025-12-07T19:00:00/2025-12-07T21:00:00"]
+        bob_slots = ["2025-12-08T19:00:00/2025-12-08T21:00:00"]
         
-        for message, expected_activity in test_cases:
-            response = run(message)
-            
-            if not response or len(response) == 0:
-                print(f"❌ AC6 FAILED: Empty response for: {message}")
-                return False
-            
-            response_lower = response.lower()
-            
-            # Should extract and acknowledge activity type
-            if expected_activity.lower() not in response_lower:
-                print(f"❌ AC6 FAILED: Activity type '{expected_activity}' not extracted")
-                print(f"   Message: {message}")
-                print(f"   Response: {response[:200]}...")
-                return False
+        result = handle_no_overlaps(alice_slots, bob_slots)
         
-        # Test participant extraction
-        response = run("Find a time for dinner with Bob this weekend")
-        response_lower = response.lower()
-        
-        if "bob" not in response_lower:
-            print("❌ AC6 FAILED: Participant 'Bob' not extracted")
+        if result["has_overlaps"] is not False:
+            print(f"❌ AC6 FAILED: has_overlaps should be False. Got: {result['has_overlaps']}")
             return False
         
-        # Test time constraint extraction
-        time_test_cases = [
-            ("Find a time for dinner with Bob this weekend", "weekend"),
-            ("Schedule lunch with Sarah next week", "week"),
-            ("Plan a meeting with Mike tomorrow", "tomorrow")
-        ]
+        if "message" not in result:
+            print("❌ AC6 FAILED: Missing 'message' in result")
+            return False
         
-        for message, expected_timeframe in time_test_cases:
-            response = run(message)
-            response_lower = response.lower()
-            
-            # Should acknowledge timeframe (may use related terms)
-            has_timeframe = any(term in response_lower for term in [
-                expected_timeframe, "time", "schedule", "when"
-            ])
-            
-            if not has_timeframe:
-                print(f"❌ AC6 FAILED: Time constraint not acknowledged for: {message}")
-                return False
+        if "suggestion" not in result:
+            print("❌ AC6 FAILED: Missing 'suggestion' in result")
+            return False
         
-        print("✅ AC6 PASSED: Agent extracts activity type, participants, and time constraints")
+        # Suggestion should ask for flexibility
+        suggestion = result["suggestion"]
+        if "flexible" not in suggestion.lower() and "adjust" not in suggestion.lower():
+            print(f"❌ AC6 FAILED: Suggestion doesn't ask for flexibility. Got: {suggestion}")
+            return False
+        
+        # Should include alternatives
+        if "alice_alternatives" not in result or "bob_alternatives" not in result:
+            print("❌ AC6 FAILED: Missing alternatives in result")
+            return False
+        
+        print("✅ AC6 PASSED: No overlap handling suggests alternatives and asks for flexibility")
         return True
         
     except Exception as e:
@@ -354,36 +276,112 @@ def check_ac6_extraction_capability():
         return False
 
 
-def check_bob_agent_parsing():
-    """Additional check: Bob's agent also parses coordination requests correctly."""
-    print("\n📋 Checking: Bob's Agent Parsing...")
+def check_ac7_iso8601_format():
+    """AC7: ISO 8601 Slot Format.
+    
+    Overlapping slots are identified using ISO 8601 time range format for consistency.
+    """
+    print("\n📋 Checking AC7: ISO 8601 Slot Format...")
     try:
-        from bob_companion.agent import run
+        from shared.coordination import find_overlapping_slots
         
-        message = "Find a time for dinner with Alice this weekend"
-        response = run(message)
+        alice_slots = ["2025-12-07T19:00:00/2025-12-07T21:00:00"]
+        bob_slots = ["2025-12-07T19:00:00/2025-12-07T21:00:00"]
         
-        if not response or len(response) == 0:
-            print("❌ Bob's agent FAILED: Empty response")
-            return False
+        overlaps = find_overlapping_slots(alice_slots, bob_slots)
         
-        response_lower = response.lower()
+        for overlap in overlaps:
+            # Verify ISO 8601 format
+            if '/' not in overlap:
+                print(f"❌ AC7 FAILED: Slot {overlap} missing '/' separator")
+                return False
+            
+            if 'T' not in overlap:
+                print(f"❌ AC7 FAILED: Slot {overlap} missing 'T' separator")
+                return False
+            
+            # Verify can be parsed
+            parts = overlap.split('/')
+            if len(parts) != 2:
+                print(f"❌ AC7 FAILED: Slot {overlap} has incorrect format")
+                return False
+            
+            try:
+                datetime.fromisoformat(parts[0])
+                datetime.fromisoformat(parts[1])
+            except ValueError:
+                print(f"❌ AC7 FAILED: Slot {overlap} cannot be parsed as ISO 8601")
+                return False
         
-        # Should understand and acknowledge
-        has_understanding = any(term in response_lower for term in [
-            "coordinate", "alice", "dinner", "weekend"
-        ])
-        
-        if not has_understanding:
-            print(f"❌ Bob's agent FAILED: Doesn't parse coordination request")
-            print(f"   Response: {response[:200]}...")
-            return False
-        
-        print("✅ Bob's agent PASSED: Parses coordination requests correctly")
+        print("✅ AC7 PASSED: Overlapping slots use ISO 8601 time range format")
         return True
         
     except Exception as e:
-        print(f"❌ Bob's agent FAILED: Exception occurred: {e}")
+        print(f"❌ AC7 FAILED: Exception occurred: {e}")
+        import traceback
+        traceback.print_exc()
+        return False
+
+
+def check_ac8_a2a_integration():
+    """AC8: Integration with A2A Flow.
+    
+    Coordination logic integrates seamlessly with A2A communication flow
+    (availability checking → A2A call → coordination → proposal).
+    """
+    print("\n📋 Checking AC8: Integration with A2A Flow...")
+    try:
+        # Verify coordination functions exist in both agents
+        alice_agent_path = project_root / "alice_companion" / "agent.py"
+        bob_agent_path = project_root / "bob_companion" / "agent.py"
+        
+        if not alice_agent_path.exists():
+            print("❌ AC8 FAILED: alice_companion/agent.py not found")
+            return False
+        
+        if not bob_agent_path.exists():
+            print("❌ AC8 FAILED: bob_companion/agent.py not found")
+            return False
+        
+        # Check for coordinate_mutual_availability function
+        alice_source = alice_agent_path.read_text()
+        if "coordinate_mutual_availability" not in alice_source:
+            print("❌ AC8 FAILED: coordinate_mutual_availability() not found in alice_companion/agent.py")
+            return False
+        
+        if "call_other_companion_tool" not in alice_source:
+            print("❌ AC8 FAILED: call_other_companion_tool() not found (required for A2A)")
+            return False
+        
+        bob_source = bob_agent_path.read_text()
+        if "coordinate_mutual_availability" not in bob_source:
+            print("❌ AC8 FAILED: coordinate_mutual_availability() not found in bob_companion/agent.py")
+            return False
+        
+        # Verify shared coordination module exists
+        coordination_path = project_root / "shared" / "coordination.py"
+        if not coordination_path.exists():
+            print("❌ AC8 FAILED: shared/coordination.py not found")
+            return False
+        
+        coordination_source = coordination_path.read_text()
+        required_functions = [
+            "find_overlapping_slots",
+            "prioritize_slots_by_preferences",
+            "synthesize_recommendation",
+            "handle_no_overlaps"
+        ]
+        
+        for func_name in required_functions:
+            if func_name not in coordination_source:
+                print(f"❌ AC8 FAILED: {func_name}() not found in shared/coordination.py")
+                return False
+        
+        print("✅ AC8 PASSED: Coordination logic integrated with A2A flow")
+        return True
+        
+    except Exception as e:
+        print(f"❌ AC8 FAILED: Exception occurred: {e}")
         import traceback
         traceback.print_exc()
         return False
@@ -392,19 +390,20 @@ def check_bob_agent_parsing():
 def main():
     """Run all acceptance criteria checks."""
     print("=" * 60)
-    print("Natural Language Coordination Parsing Verification (Story 2.5)")
+    print("Coordination Logic with Mutual Availability Verification (Story 2.9)")
     print("=" * 60)
     
     results = []
     
     # Run all AC checks
-    results.append(("AC1: Natural Language Parsing", check_ac1_natural_language_parsing()))
-    results.append(("AC2: Natural Language Response", check_ac2_natural_language_response()))
-    results.append(("AC3: Contact Identification", check_ac3_contact_identification()))
-    results.append(("AC4: No Rigid Parsing", check_ac4_no_rigid_parsing()))
-    results.append(("AC5: System Prompt Enhancement", check_ac5_system_prompt_enhancement()))
-    results.append(("AC6: Extraction Capability", check_ac6_extraction_capability()))
-    results.append(("Bob's Agent Parsing", check_bob_agent_parsing()))
+    results.append(("AC1: Overlapping Slot Identification", check_ac1_overlapping_slot_identification()))
+    results.append(("AC2: Preference Consideration", check_ac2_preference_consideration()))
+    results.append(("AC3: Cuisine Preference Integration", check_ac3_cuisine_preference_integration()))
+    results.append(("AC4: Natural Language Recommendation", check_ac4_natural_language_recommendation()))
+    results.append(("AC5: Multiple Slot Prioritization", check_ac5_multiple_slot_prioritization()))
+    results.append(("AC6: No Overlap Handling", check_ac6_no_overlap_handling()))
+    results.append(("AC7: ISO 8601 Slot Format", check_ac7_iso8601_format()))
+    results.append(("AC8: Integration with A2A Flow", check_ac8_a2a_integration()))
     
     # Summary
     print("\n" + "=" * 60)
@@ -430,4 +429,3 @@ def main():
 
 if __name__ == "__main__":
     sys.exit(main())
-

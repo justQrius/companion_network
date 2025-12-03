@@ -17,6 +17,12 @@ from alice_companion.user_context import get_alice_context
 from alice_companion.mcp_client import MCPClient
 from shared.availability import check_availability
 from shared.a2a_logging import log_a2a_event
+from shared.coordination import (
+    find_overlapping_slots,
+    prioritize_slots_by_preferences,
+    synthesize_recommendation,
+    handle_no_overlaps
+)
 
 # Configuration constants
 AGENT_NAME = "alices_companion"  # Valid identifier (spaces/special chars not allowed)
@@ -29,6 +35,7 @@ DATABASE_PATH = Path(__file__).parent.parent / "companion_sessions.db"
 # Enhanced with natural language coordination request parsing (Story 2.5)
 # Enhanced with availability checking capability (Story 2.7)
 # Enhanced with A2A communication capability (Story 2.8)
+# Enhanced with coordination logic capability (Story 2.9)
 SYSTEM_INSTRUCTION = """You are Alice's personal Companion agent. You coordinate plans on Alice's behalf, 
 maintaining her privacy while facilitating natural conversations with other companions. 
 You help schedule events, share availability, and propose activities while respecting 
@@ -67,11 +74,23 @@ When Alice makes a coordination request, you should:
    - Example: result = await call_other_companion_tool("check_availability", timeframe="this weekend", requester="alice")
    - Always check for "error" key in result before processing: if "error" in result, inform Alice gracefully
 
-6. **Acknowledge Naturally**: Respond with natural language acknowledgment that shows understanding:
+6. **Coordinate Mutual Availability**: When you need to find a time that works for both Alice and another user,
+   use the coordinate_mutual_availability() helper function. This function:
+   - Checks Alice's availability for the requested timeframe
+   - Calls the other Companion's check_availability tool via A2A
+   - Finds overlapping time slots where both users are available
+   - Prioritizes slots based on dining time and cuisine preferences
+   - Synthesizes a natural language recommendation
+   - Example: result = await coordinate_mutual_availability("this weekend", "bob")
+   - If result["success"] is True, present result["recommendation"] to Alice
+   - If no overlaps exist, present result["alternatives"]["suggestion"] and ask for flexibility
+   - Always handle errors gracefully and provide clear feedback
+
+7. **Acknowledge Naturally**: Respond with natural language acknowledgment that shows understanding:
    - Example: "I'll check your availability for this weekend and coordinate with Bob's Companion to find a time for dinner..."
    - Use conversational tone, not JSON or structured formats
 
-7. **Identify Contact Need**: Determine which Companion agent you need to contact for coordination
+8. **Identify Contact Need**: Determine which Companion agent you need to contact for coordination
    (e.g., if Alice mentions "Bob", you'll need to contact Bob's Companion).
 
 Remember: Use natural language understanding - Alice doesn't need to use specific commands or syntax.
@@ -445,6 +464,142 @@ async def check_alice_availability(timeframe: str, duration_hours: int = 2) -> l
         max_slots=5,
         min_slots=3
     )
+
+
+async def coordinate_mutual_availability(
+    timeframe: str,
+    other_user_id: str = "bob",
+    duration_hours: int = 2
+) -> dict:
+    """Coordinate mutual availability with another user's Companion.
+    
+    This function implements the coordination logic flow:
+    1. Check Alice's availability for the timeframe
+    2. Call Bob's Companion via A2A to check Bob's availability
+    3. Find overlapping slots
+    4. Prioritize slots by preferences
+    5. Synthesize natural language recommendation
+    
+    Integration Pattern (Story 2.9):
+    - Uses Story 2.7: check_alice_availability() for Alice's slots
+    - Uses Story 2.8: call_other_companion_tool() to get Bob's availability
+    - Uses shared coordination functions for slot intersection and prioritization
+    - Returns structured result with recommendation or alternatives
+    
+    Error Handling:
+    - If A2A call fails, returns error dict with graceful message
+    - If no overlaps exist, returns alternatives via handle_no_overlaps()
+    - All errors are handled gracefully (demo must never crash)
+    
+    Args:
+        timeframe: Natural language timeframe (e.g., "this weekend") or ISO 8601 range
+        other_user_id: User ID of the other user (default: "bob")
+        duration_hours: Duration of event in hours (default: 2 for dinner)
+        
+    Returns:
+        Dictionary with keys:
+        - "success": bool indicating if coordination succeeded
+        - "recommendation": Natural language recommendation (if overlaps found)
+        - "slots": List of prioritized overlapping slots (ISO 8601 format)
+        - "alternatives": Dict with alternatives (if no overlaps)
+        - "error": Error message (if coordination failed)
+        
+    Example:
+        result = await coordinate_mutual_availability("this weekend", "bob")
+        if result.get("success"):
+            print(result["recommendation"])  # "Saturday 7pm, Bob prefers Italian"
+        elif "error" in result:
+            print(result["error"])  # Graceful error message
+        else:
+            print(result["alternatives"]["suggestion"])  # Flexibility request
+    """
+    # Get current session to access user context
+    session = await session_service.get_session(
+        app_name="companion_network",
+        user_id="alice",
+        session_id=SESSION_ID
+    )
+    
+    if not session or "user_context" not in session.state:
+        return {
+            "success": False,
+            "error": "Alice's user context not found in session state"
+        }
+    
+    alice_context = session.state["user_context"]
+    alice_preferences = alice_context.get("preferences", {})
+    
+    # Step 1: Check Alice's availability (Story 2.7)
+    try:
+        alice_slots = await check_alice_availability(timeframe, duration_hours)
+    except ValueError as e:
+        return {
+            "success": False,
+            "error": f"Unable to check Alice's availability: {str(e)}"
+        }
+    
+    # Step 2: Call Bob's Companion via A2A to check Bob's availability (Story 2.8)
+    bob_result = await call_other_companion_tool(
+        "check_availability",
+        timeframe=timeframe,
+        event_type="dinner",
+        duration_minutes=duration_hours * 60,
+        requester="alice"
+    )
+    
+    # Handle A2A call errors gracefully
+    if "error" in bob_result:
+        return {
+            "success": False,
+            "error": bob_result["error"],
+            "alice_slots": alice_slots  # Still provide Alice's availability
+        }
+    
+    # Extract Bob's slots and preferences from A2A response
+    bob_slots = bob_result.get("slots", [])
+    bob_preferences = bob_result.get("preferences", {})
+    
+    # Step 3: Find overlapping slots (AC: 1, 7)
+    overlapping_slots = find_overlapping_slots(alice_slots, bob_slots)
+    
+    # Step 4: Handle no overlaps case (AC: 6)
+    if not overlapping_slots:
+        no_overlap_result = handle_no_overlaps(
+            alice_slots,
+            bob_slots,
+            alice_name="Alice",
+            bob_name="Bob"
+        )
+        return {
+            "success": False,
+            "has_overlaps": False,
+            "alternatives": no_overlap_result,
+            "message": no_overlap_result["message"],
+            "suggestion": no_overlap_result["suggestion"]
+        }
+    
+    # Step 5: Prioritize slots by preferences (AC: 2, 3, 5)
+    prioritized_slots = prioritize_slots_by_preferences(
+        overlapping_slots,
+        alice_preferences,
+        bob_preferences
+    )
+    
+    # Step 6: Synthesize natural language recommendation (AC: 4)
+    recommendation = synthesize_recommendation(
+        prioritized_slots,
+        alice_preferences,
+        bob_preferences,
+        bob_name="Bob"
+    )
+    
+    return {
+        "success": True,
+        "recommendation": recommendation,
+        "slots": prioritized_slots,
+        "alice_preferences": alice_preferences,
+        "bob_preferences": bob_preferences
+    }
 
 
 # For AC3: "agent.run() method is available" - use run() function
