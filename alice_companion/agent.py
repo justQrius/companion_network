@@ -18,6 +18,9 @@ from io import StringIO
 warnings.filterwarnings('ignore', message='.*App name mismatch.*')
 logging.getLogger('google.adk').setLevel(logging.ERROR)
 
+# Initialize logger for this module
+logger = logging.getLogger(__name__)
+
 # Load environment variables from .env file
 load_dotenv()
 
@@ -131,23 +134,9 @@ session_service = SqliteSessionService(db_path=str(DATABASE_PATH))
 # Initialize memory service (non-persistent, in-memory)
 memory_service = InMemoryMemoryService()
 
-# Create agent instance
-agent = Agent(
-    name=AGENT_NAME,
-    model=MODEL,
-    instruction=SYSTEM_INSTRUCTION,
-    description=f"{AGENT_DISPLAY_NAME} - Coordinates plans on Alice's behalf"
-)
-
-# Create runner with session and memory services
-# Suppress harmless ADK app name mismatch warning (printed to stderr)
-with redirect_stderr(StringIO()):
-    runner = Runner(
-        app_name="companion_network",
-        agent=agent,
-        session_service=session_service,
-        memory_service=memory_service
-    )
+# Agent will be created after tool definitions (see end of file)
+agent = None
+runner = None
 
 
 async def _initialize_user_context():
@@ -311,12 +300,28 @@ def get_mcp_client() -> MCPClient:
     return _mcp_client
 
 
+async def _check_bob_server_health() -> bool:
+    """Check if Bob's MCP server is accessible.
+    
+    Returns:
+        True if server is accessible, False otherwise
+    """
+    try:
+        import httpx
+        response = httpx.get("http://localhost:8002/health", timeout=2.0)
+        return response.status_code == 200
+    except Exception:
+        return False
+
+
 async def call_other_companion_tool(tool_name: str, **params) -> dict:
     """Call a tool on another Companion's MCP server with error handling and logging.
     
     This function implements A2A (Agent-to-Agent) communication following the architecture
     error handling pattern. It calls tools on Bob's Companion MCP server using JSON-RPC 2.0
     protocol, handles errors gracefully, and logs events for the network activity monitor.
+    
+    Pre-flight check: Verifies Bob's server is accessible before attempting tool call.
     
     Integration Pattern (Story 2.8):
     1. Agent identifies coordination need (e.g., "Find time with Bob")
@@ -372,12 +377,42 @@ async def call_other_companion_tool(tool_name: str, **params) -> dict:
         }
         return error_result
     
+    # Pre-flight check: Verify Bob's server is accessible
+    if not await _check_bob_server_health():
+        error_result = {
+            "error": "Bob's Companion is not available. Please ensure Bob's Companion MCP server is running on localhost:8002.",
+            "details": "Health check failed for http://localhost:8002/health"
+        }
+        logger.error(f"Pre-flight check failed: Bob's server not accessible before calling {tool_name}")
+        
+        # Log failed A2A event
+        if session:
+            log_a2a_event(
+                session_state=session.state,
+                sender="alice",
+                receiver="bob",
+                tool=tool_name,
+                params=params,
+                result=error_result
+            )
+            await session_service.update_session_state(
+                app_name="companion_network",
+                user_id="alice",
+                session_id=SESSION_ID,
+                state=session.state
+            )
+        
+        return error_result
+    
     # Get MCP client and attempt tool call
     client = get_mcp_client()
+    
+    logger.info(f"Calling A2A tool: {tool_name} with params: {list(params.keys())}")
     
     try:
         # Call tool on Bob's MCP server (includes retry logic per architecture pattern)
         result = await client.call_tool(tool_name, **params)
+        logger.info(f"A2A tool call succeeded: {tool_name}")
         
         # Log successful A2A event
         log_a2a_event(
@@ -401,8 +436,10 @@ async def call_other_companion_tool(tool_name: str, **params) -> dict:
         
     except ConnectionError as e:
         # Connection error after retry - return graceful error message
+        error_msg = "Agent temporarily unavailable: Cannot connect to Bob's Companion. Please ensure Bob's Companion is running."
+        logger.error(f"A2A connection error for tool {tool_name}: {e}")
         error_result = {
-            "error": "Agent temporarily unavailable: Cannot connect to Bob's Companion. Please ensure Bob's Companion is running.",
+            "error": error_msg,
             "details": str(e)
         }
         
@@ -616,6 +653,7 @@ async def coordinate_mutual_availability(
         }
     
     # Step 2: Call Bob's Companion via A2A to check Bob's availability (Story 2.8)
+    logger.info(f"Attempting A2A call to Bob's Companion: check_availability(timeframe={timeframe})")
     bob_result = await call_other_companion_tool(
         "check_availability",
         timeframe=timeframe,
@@ -626,11 +664,15 @@ async def coordinate_mutual_availability(
     
     # Handle A2A call errors gracefully
     if "error" in bob_result:
+        error_msg = bob_result["error"]
+        logger.warning(f"A2A call to Bob's Companion failed: {error_msg}")
         return {
             "success": False,
-            "error": bob_result["error"],
+            "error": error_msg,
             "alice_slots": alice_slots  # Still provide Alice's availability
         }
+    
+    logger.info(f"A2A call to Bob's Companion succeeded: {len(bob_result.get('slots', []))} slots found")
     
     # Extract Bob's slots and preferences from A2A response
     bob_slots = bob_result.get("slots", [])
@@ -1110,12 +1152,28 @@ async def handle_user_confirmation(
         from dataclasses import asdict
         event_proposal = EventProposal(**updated_proposal)
         
-        return {
-            "confirmed": True,
-            "event_proposal": event_proposal,
-            "event_id": pending_event_id,
-            "message": "Event proposal confirmed. Ready to finalize with the other party."
-        }
+        # Automatically finalize event with other companion when user confirms
+        finalize_result = await finalize_event_with_other_companion(event_proposal, proposer_user_id)
+        
+        if finalize_result.get("success"):
+            return {
+                "confirmed": True,
+                "event_proposal": event_proposal,
+                "event_id": pending_event_id,
+                "status": finalize_result.get("status", "pending"),
+                "message": finalize_result.get("message", "Event proposal sent to the other party."),
+                "finalized": True
+            }
+        else:
+            # Finalization failed, but user confirmed
+            return {
+                "confirmed": True,
+                "event_proposal": event_proposal,
+                "event_id": pending_event_id,
+                "message": f"Event confirmed, but couldn't reach the other party: {finalize_result.get('error', 'Unknown error')}",
+                "finalized": False,
+                "error": finalize_result.get("error")
+            }
     else:
         return {
             "confirmed": False,
@@ -1223,6 +1281,34 @@ async def finalize_event_with_other_companion(
         "event_id": response_event_id
     }
 
+
+# Initialize agent with all coordination tools
+# Tools must be registered so the agent can call them
+agent = Agent(
+    name=AGENT_NAME,
+    model=MODEL,
+    instruction=SYSTEM_INSTRUCTION,
+    description=f"{AGENT_DISPLAY_NAME} - Coordinates plans on Alice's behalf",
+    tools=[
+        coordinate_mutual_availability,
+        call_other_companion_tool,
+        check_alice_availability,
+        propose_event_to_user,
+        handle_user_confirmation
+        # Note: finalize_event_with_other_companion is called internally by handle_user_confirmation
+        # and is not exposed as a tool due to EventProposal dataclass parameter
+    ]
+)
+
+# Create runner with session and memory services
+# Suppress harmless ADK app name mismatch warning (printed to stderr)
+with redirect_stderr(StringIO()):
+    runner = Runner(
+        app_name="companion_network",
+        agent=agent,
+        session_service=session_service,
+        memory_service=memory_service
+    )
 
 # For AC3: "agent.run() method is available" - use run() function
 # Note: Agent is a Pydantic model, so we use a module-level function

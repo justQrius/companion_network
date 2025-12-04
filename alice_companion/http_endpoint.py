@@ -25,6 +25,16 @@ logger = logging.getLogger(__name__)
 app = FastAPI(title="Alice's Companion MCP Server")
 
 
+@app.get("/health")
+async def health_check():
+    """Health check endpoint for verifying server status.
+    
+    Returns:
+        JSON response with status "ok" if server is running
+    """
+    return {"status": "ok", "server": "alice"}
+
+
 @app.post("/run")
 async def handle_jsonrpc(request: Request) -> JSONResponse:
     """Handle JSON-RPC 2.0 requests and route to MCP tools.

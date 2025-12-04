@@ -781,12 +781,47 @@ def start_mcp_servers() -> None:
         )
         bob_mcp_thread.start()
         
-        # Give servers a moment to start
-        time.sleep(2)
+        # Wait for servers to start and verify they're accessible
+        max_wait_time = 10  # Maximum wait time in seconds
+        wait_interval = 0.5  # Check every 500ms
+        max_attempts = int(max_wait_time / wait_interval)
         
-        logger.info("✅ Alice MCP server started on localhost:8001")
-        logger.info("✅ Bob MCP server started on localhost:8002")
-        logger.info("✅ Both MCP servers started successfully")
+        alice_ready = False
+        bob_ready = False
+        
+        for attempt in range(max_attempts):
+            # Check Alice's server
+            if not alice_ready:
+                try:
+                    response = httpx.get("http://localhost:8001/health", timeout=1.0)
+                    if response.status_code == 200:
+                        alice_ready = True
+                        logger.info("✅ Alice MCP server ready on localhost:8001")
+                except Exception:
+                    pass  # Server not ready yet
+            
+            # Check Bob's server
+            if not bob_ready:
+                try:
+                    response = httpx.get("http://localhost:8002/health", timeout=1.0)
+                    if response.status_code == 200:
+                        bob_ready = True
+                        logger.info("✅ Bob MCP server ready on localhost:8002")
+                except Exception:
+                    pass  # Server not ready yet
+            
+            if alice_ready and bob_ready:
+                break
+            
+            time.sleep(wait_interval)
+        
+        # Verify both servers are ready
+        if not alice_ready:
+            raise Exception("Alice MCP server failed to start or is not accessible on localhost:8001")
+        if not bob_ready:
+            raise Exception("Bob MCP server failed to start or is not accessible on localhost:8002")
+        
+        logger.info("✅ Both MCP servers started and verified successfully")
         
     except Exception as e:
         logger.error(f"❌ Failed to start MCP servers: {e}", exc_info=True)
@@ -797,19 +832,16 @@ def verify_a2a_endpoints() -> None:
     """
     Verify A2A endpoints are accessible before launching Gradio UI.
     
-    Checks that both endpoints respond to HTTP requests:
-    - http://localhost:8001/run (Alice)
-    - http://localhost:8002/run (Bob)
-    
-    Note: These are POST-only endpoints, so we expect 405 Method Not Allowed
-    for GET requests, which confirms the server is running.
+    Checks that both health endpoints respond:
+    - http://localhost:8001/health (Alice)
+    - http://localhost:8002/health (Bob)
     
     Raises:
         Exception: If endpoints are not accessible
     """
     endpoints = [
-        ("Alice", "http://localhost:8001/run"),
-        ("Bob", "http://localhost:8002/run")
+        ("Alice", "http://localhost:8001/health"),
+        ("Bob", "http://localhost:8002/health")
     ]
     
     for name, url in endpoints:
@@ -818,16 +850,16 @@ def verify_a2a_endpoints() -> None:
         
         for attempt in range(max_retries):
             try:
-                # Try a GET request to verify endpoint is accessible
-                # POST-only endpoints will return 405, which confirms server is running
                 response = httpx.get(url, timeout=2.0)
-                # Any response (including 405) means server is running
-                if response.status_code == 405:
-                    logger.info(f"✅ {name} A2A endpoint accessible at {url} (POST-only endpoint)")
+                if response.status_code == 200:
+                    logger.info(f"✅ {name} A2A endpoint accessible at {url}")
                     break
                 else:
-                    logger.info(f"✅ {name} A2A endpoint accessible at {url} (status: {response.status_code})")
-                    break
+                    logger.warning(f"⚠️ {name} endpoint returned status {response.status_code}")
+                    if attempt < max_retries - 1:
+                        time.sleep(retry_delay)
+                    else:
+                        raise Exception(f"❌ {name} A2A endpoint not accessible at {url} (status: {response.status_code})")
             except httpx.ConnectError:
                 # Server not ready yet, wait and retry
                 if attempt < max_retries - 1:
@@ -836,16 +868,11 @@ def verify_a2a_endpoints() -> None:
                 else:
                     raise Exception(f"❌ {name} A2A endpoint not accessible at {url} after {max_retries} attempts")
             except Exception as e:
-                # For POST-only endpoints, 405 is expected
-                if "405" in str(e) or "Method Not Allowed" in str(e) or hasattr(e, 'response') and e.response.status_code == 405:
-                    logger.info(f"✅ {name} A2A endpoint accessible at {url} (POST-only endpoint)")
-                    break
+                if attempt < max_retries - 1:
+                    logger.debug(f"⏳ {name} endpoint error (attempt {attempt + 1}/{max_retries}): {e}, retrying...")
+                    time.sleep(retry_delay)
                 else:
-                    if attempt < max_retries - 1:
-                        logger.debug(f"⏳ {name} endpoint error (attempt {attempt + 1}/{max_retries}): {e}, retrying...")
-                        time.sleep(retry_delay)
-                    else:
-                        raise Exception(f"❌ {name} A2A endpoint verification failed: {e}")
+                    raise Exception(f"❌ {name} A2A endpoint verification failed: {e}")
 
 
 def startup_sequence() -> None:
