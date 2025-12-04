@@ -203,18 +203,49 @@ async def _run_alice_agent_async(message: str) -> str:
     
     # Generate main agent response
     content = types.Content(role='user', parts=[types.Part(text=message)])
-    response_parts = []
+    all_responses = []
+
     async for event in alice_runner.run_async(
         user_id="alice",
         session_id="alice_session",
         new_message=content
     ):
         if event.content and event.content.parts:
+            # Collect text from this event
+            event_text_parts = []
             for part in event.content.parts:
                 if part.text:
-                    response_parts.append(part.text)
-    
-    main_response = "".join(response_parts)
+                    event_text_parts.append(part.text)
+
+            # If this event has text, store it
+            if event_text_parts:
+                event_text = "".join(event_text_parts)
+                all_responses.append(event_text)
+
+    # Filter and select best response
+    # Prefer responses that mention coordination actions over generic greetings
+    main_response = ""
+    if all_responses:
+        # Check for coordination keywords
+        coordination_keywords = ["coordinate", "check", "availability", "schedule", "find a time", "propose", "dinner", "lunch", "meeting", "Bob"]
+
+        # Find first response with coordination keywords
+        for response in all_responses:
+            if any(keyword.lower() in response.lower() for keyword in coordination_keywords):
+                main_response = response
+                break
+
+        # If no coordination response found, use the first non-generic response
+        if not main_response:
+            generic_patterns = ["Hi, I'm", "Hello, I'm", "How can I help"]
+            for response in all_responses:
+                if not any(pattern in response for pattern in generic_patterns):
+                    main_response = response
+                    break
+
+        # Fall back to first response if all else fails
+        if not main_response:
+            main_response = all_responses[0]
     
     # Append formatted messages to agent response (before main response content)
     if pending_messages_text:
@@ -278,18 +309,49 @@ async def _run_bob_agent_async(message: str) -> str:
     
     # Generate main agent response
     content = types.Content(role='user', parts=[types.Part(text=message)])
-    response_parts = []
+    all_responses = []
+
     async for event in bob_runner.run_async(
         user_id="bob",
         session_id="bob_session",
         new_message=content
     ):
         if event.content and event.content.parts:
+            # Collect text from this event
+            event_text_parts = []
             for part in event.content.parts:
                 if part.text:
-                    response_parts.append(part.text)
-    
-    main_response = "".join(response_parts)
+                    event_text_parts.append(part.text)
+
+            # If this event has text, store it
+            if event_text_parts:
+                event_text = "".join(event_text_parts)
+                all_responses.append(event_text)
+
+    # Filter and select best response
+    # Prefer responses that mention coordination actions over generic greetings
+    main_response = ""
+    if all_responses:
+        # Check for coordination keywords
+        coordination_keywords = ["coordinate", "check", "availability", "schedule", "find a time", "propose", "dinner", "lunch", "meeting", "Alice"]
+
+        # Find first response with coordination keywords
+        for response in all_responses:
+            if any(keyword.lower() in response.lower() for keyword in coordination_keywords):
+                main_response = response
+                break
+
+        # If no coordination response found, use the first non-generic response
+        if not main_response:
+            generic_patterns = ["Hi, I'm", "Hello, I'm", "How can I help"]
+            for response in all_responses:
+                if not any(pattern in response for pattern in generic_patterns):
+                    main_response = response
+                    break
+
+        # Fall back to first response if all else fails
+        if not main_response:
+            main_response = all_responses[0]
     
     # Append formatted messages to agent response (before main response content)
     if pending_messages_text:
@@ -828,14 +890,17 @@ def start_mcp_servers() -> None:
         raise
 
 
-def verify_a2a_endpoints() -> None:
+def verify_a2a_endpoints() -> Tuple[bool, bool]:
     """
     Verify A2A endpoints are accessible before launching Gradio UI.
-    
+
     Checks that both health endpoints respond:
     - http://localhost:8001/health (Alice)
     - http://localhost:8002/health (Bob)
-    
+
+    Returns:
+        Tuple[bool, bool]: (alice_ok, bob_ok) - True if endpoint is accessible
+
     Raises:
         Exception: If endpoints are not accessible
     """
@@ -843,16 +908,20 @@ def verify_a2a_endpoints() -> None:
         ("Alice", "http://localhost:8001/health"),
         ("Bob", "http://localhost:8002/health")
     ]
-    
+
+    results = []
+
     for name, url in endpoints:
         max_retries = 5
         retry_delay = 0.5
-        
+        endpoint_ok = False
+
         for attempt in range(max_retries):
             try:
                 response = httpx.get(url, timeout=2.0)
                 if response.status_code == 200:
                     logger.info(f"✅ {name} A2A endpoint accessible at {url}")
+                    endpoint_ok = True
                     break
                 else:
                     logger.warning(f"⚠️ {name} endpoint returned status {response.status_code}")
@@ -873,6 +942,10 @@ def verify_a2a_endpoints() -> None:
                     time.sleep(retry_delay)
                 else:
                     raise Exception(f"❌ {name} A2A endpoint verification failed: {e}")
+
+        results.append(endpoint_ok)
+
+    return tuple(results)
 
 
 def startup_sequence() -> None:

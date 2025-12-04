@@ -14,7 +14,8 @@ from io import StringIO
 # Suppress harmless ADK app name mismatch warning
 # ADK infers app name from Agent class file path, but we explicitly set app_name="companion_network"
 warnings.filterwarnings('ignore', message='.*App name mismatch.*')
-logging.getLogger('google.adk').setLevel(logging.ERROR)
+# Enable DEBUG logging to diagnose tool call issues
+logging.getLogger('google.adk').setLevel(logging.DEBUG)
 
 # Initialize logger for this module
 logger = logging.getLogger(__name__)
@@ -23,6 +24,7 @@ logger = logging.getLogger(__name__)
 load_dotenv()
 
 from google.adk import Agent, Runner
+from google.adk.apps import App
 from alice_companion.sqlite_session_service import SqliteSessionService
 from google.adk.memory import InMemoryMemoryService
 from bob_companion.user_context import get_bob_context
@@ -1236,12 +1238,18 @@ agent = Agent(
     ]
 )
 
+# Wrap agent in App to fix ADK session/agent path mismatch
+# This ensures ADK correctly associates the agent with the "companion_network" app
+app = App(
+    name="companion_network",
+    root_agent=agent
+)
+
 # Create runner with session and memory services
 # Suppress harmless ADK app name mismatch warning (printed to stderr)
 with redirect_stderr(StringIO()):
     runner = Runner(
-        app_name="companion_network",
-        agent=agent,
+        app=app,  # Use app instead of app_name + agent to fix tool calling
         session_service=session_service,
         memory_service=memory_service
     )

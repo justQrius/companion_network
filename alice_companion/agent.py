@@ -16,7 +16,8 @@ from io import StringIO
 # Suppress harmless ADK app name mismatch warning
 # ADK infers app name from Agent class file path, but we explicitly set app_name="companion_network"
 warnings.filterwarnings('ignore', message='.*App name mismatch.*')
-logging.getLogger('google.adk').setLevel(logging.ERROR)
+# Enable DEBUG logging to diagnose tool call issues
+logging.getLogger('google.adk').setLevel(logging.DEBUG)
 
 # Initialize logger for this module
 logger = logging.getLogger(__name__)
@@ -1300,12 +1301,20 @@ agent = Agent(
     ]
 )
 
-# Create runner with session and memory services
+# Wrap agent in App to fix ADK path mismatch issue
+# ADK determines app_name from agent file location, causing session lookup failures
+# Using App pattern explicitly sets app_name regardless of file location
+from google.adk.apps import App
+app = App(
+    name="companion_network",
+    root_agent=agent
+)
+
+# Create runner with app (not raw agent)
 # Suppress harmless ADK app name mismatch warning (printed to stderr)
 with redirect_stderr(StringIO()):
     runner = Runner(
-        app_name="companion_network",
-        agent=agent,
+        app=app,  # Use app instead of agent + app_name
         session_service=session_service,
         memory_service=memory_service
     )

@@ -13,7 +13,14 @@ from datetime import datetime, timedelta
 from typing import Dict, Any, List, Tuple
 from unittest.mock import Mock, patch, AsyncMock
 import sys
+import io
 from pathlib import Path
+
+# Configure UTF-8 output for cross-platform compatibility (Windows fix)
+if sys.stdout.encoding != 'utf-8':
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+if sys.stderr.encoding != 'utf-8':
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
 
 # Add project root to path
 project_root = Path(__file__).parent.parent

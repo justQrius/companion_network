@@ -64,3 +64,12 @@ coverage.xml
 # Documentation (local only, not pushed to remote)
 docs/
 
+
+# IDE and tool directories
+.agent/
+.agentvibes/
+.bmad/
+.claude/
+.cursor/
+.gemini/
+.mcp.json

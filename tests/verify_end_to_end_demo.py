@@ -6,12 +6,19 @@ Verifies all acceptance criteria, performance targets, NFR satisfaction, and FR 
 """
 
 import sys
+import io
 import time
 import asyncio
 import httpx
 from pathlib import Path
 from datetime import datetime
 from typing import Dict, Any, List, Tuple
+
+# Configure UTF-8 output for cross-platform compatibility (Windows fix)
+if sys.stdout.encoding != 'utf-8':
+    sys.stdout = io.TextIOWrapper(sys.stdout.buffer, encoding='utf-8')
+if sys.stderr.encoding != 'utf-8':
+    sys.stderr = io.TextIOWrapper(sys.stderr.buffer, encoding='utf-8')
 
 # Add project root to path
 project_root = Path(__file__).parent.parent
@@ -578,7 +585,7 @@ async def main():
             check_ac9_demo_readiness,
             check_ac10_fr_coverage,
         ]
-        
+
         results = []
         for check in checks:
             try:
@@ -588,8 +595,8 @@ async def main():
                 print(f"❌ Check failed with exception: {e}")
                 results.append(False)
         return results
-    
-    results = asyncio.run(run_all_checks())
+
+    results = await run_all_checks()
     
     # Summary
     print("\n" + "=" * 60)
